@@ -40,7 +40,7 @@ PATTERNS = {
     'MAC address': r'(?<![A-Fa-f0-9])(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}(?![A-Fa-f0-9])',
 }
 COMPILED = {name: re.compile(pattern) for name, pattern in PATTERNS.items()}
-IPV4 = re.compile(r'(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])')
+IPV4 = re.compile(r'(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)')
 IPV6 = re.compile(r'(?<![\w:])(?:[0-9a-fA-F]{0,4}:){3,7}[0-9a-fA-F]{0,4}(?![\w:])')
 FORBIDDEN_FILES = re.compile(r'(?:^|/)(?:build|dist|\.build|\.swiftpm|__MACOSX)(?:/|$)|'
                              r'(?:^|/)(?:\.DS_Store|\._[^/]+|\.env(?:\.[^/]+)?)(?:$|/)|'
@@ -63,6 +63,15 @@ def findings(data, hints):
     return found
 
 
+def safe_label(label, hints):
+    # A path may itself be the private value. Never interpolate such a label
+    # into diagnostics, even when the reported failure is unrelated to privacy.
+    if findings(label.encode('utf-8', errors='surrogateescape'), hints):
+        return label.split(':', 1)[0] + ':[redacted path]'
+    # Keep filenames containing control characters on one diagnostic line.
+    return ''.join(character if character.isprintable() else '?' for character in label)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--history', action='store_true', help='Also inspect all reachable Git blobs and commit messages.')
@@ -74,11 +83,17 @@ def main():
     scanned = set()
     count = 0
 
-    def inspect(label, data, path=None, source=True):
+    def inspect_path(label, path, source=True):
+        label = safe_label(label, hints)
+        for reason in findings(path.encode('utf-8', errors='surrogateescape'), hints):
+            issues.append((label, 'private data in path: ' + reason))
+        if source and FORBIDDEN_FILES.search(path):
+            issues.append((label, 'excluded file type or directory'))
+
+    def inspect(label, data, source=True):
         nonlocal count
         count += 1
-        if source and path and FORBIDDEN_FILES.search(path):
-            issues.append((label, 'excluded file type or directory'))
+        label = safe_label(label, hints)
         if source and b'\0' in data:
             issues.append((label, 'binary file in source Git history'))
         for reason in findings(data, hints):
@@ -88,21 +103,39 @@ def main():
         if not entry:
             continue
         metadata, name = entry.split(b'\t', 1)
-        _, object_id, stage = metadata.decode().split()
-        if stage != '0':
+        _, object_id, stage = metadata.split()
+        path = os.fsdecode(name)
+        inspect_path('index:' + path, path)
+        if stage != b'0':
             issues.append(('index', 'unmerged entry'))
             continue
-        path = name.decode()
-        inspect('index:' + path, git('cat-file', 'blob', object_id), path)
+        inspect('index:' + path, git('cat-file', 'blob', object_id))
         scanned.add(object_id)
 
     if args.history:
-        for entry in git('rev-list', '--objects', '--all').decode().splitlines():
-            object_id, _, path = entry.partition(' ')
-            if object_id in scanned or git('cat-file', '-t', object_id).strip() != b'blob':
-                continue
-            inspect('history:' + (path or object_id[:12]), git('cat-file', 'blob', object_id), path)
-            scanned.add(object_id)
+        # rev-list --objects reports only one name for a reused blob. Walk
+        # every distinct commit tree with NUL delimiters to retain renamed
+        # paths, directory names, and filenames containing newlines.
+        trees = git('log', '--all', '--format=%T').splitlines()
+        paths = set()
+        for tree in dict.fromkeys(trees):
+            for entry in git('ls-tree', '-r', '-t', '-z', tree.decode()).split(b'\0'):
+                if not entry:
+                    continue
+                metadata, name = entry.split(b'\t', 1)
+                _, kind, object_id = metadata.split()
+                path = os.fsdecode(name)
+                if path not in paths:
+                    inspect_path('history:' + path, path)
+                    paths.add(path)
+                if kind == b'blob' and object_id not in scanned:
+                    inspect('history:' + path, git('cat-file', 'blob', object_id))
+                    scanned.add(object_id)
+        # Include blobs directly referenced by tags as well as commit trees.
+        for object_id in git('rev-list', '--objects', '--all', '--no-object-names').splitlines():
+            if object_id not in scanned and git('cat-file', '-t', object_id).strip() == b'blob':
+                inspect('history:' + object_id.decode()[:12], git('cat-file', 'blob', object_id))
+                scanned.add(object_id)
         # Author/committer email metadata is intentionally permitted. Messages
         # and file contents are still checked for personal data and credentials.
         for commit in git('rev-list', '--all').decode().splitlines():
@@ -115,20 +148,22 @@ def main():
             seen = set()
             for item in archive.infolist():
                 path = item.filename
+                label = safe_label('archive:' + path, hints)
+                inspect_path('archive:' + path, path, source=False)
                 if path in seen:
                     issues.append(('archive', 'duplicate entry'))
                 seen.add(path)
                 if not path.startswith('CmdTabo.app/') or '..' in path.split('/') or path.startswith('/'):
                     issues.append(('archive', 'unexpected or absolute entry path'))
                 if item.extra or item.comment:
-                    issues.append(('archive:' + path, 'extended ZIP metadata'))
+                    issues.append((label, 'extended ZIP metadata'))
                 if item.is_dir():
                     continue
                 if not (path in ['CmdTabo.app/Contents/Info.plist', 'CmdTabo.app/Contents/MacOS/CmdTabo',
                                  'CmdTabo.app/Contents/_CodeSignature/CodeResources']
                         or path.startswith('CmdTabo.app/Contents/Resources/')):
-                    issues.append(('archive:' + path, 'unexpected bundled file'))
-                inspect('archive:' + path, archive.read(item), source=False)
+                    issues.append((label, 'unexpected bundled file'))
+                inspect(label, archive.read(item), source=False)
             if 'CmdTabo.app/Contents/MacOS/CmdTabo' not in seen:
                 issues.append(('archive', 'missing app executable'))
 

@@ -14,7 +14,7 @@ An app with eligible windows on both displays appears on both. Windows spanning 
 
 Get the Apple Silicon build from [Releases](https://github.com/dmrtx/CmdTabo/releases), extract the ZIP, and move **CmdTabo.app** to a stable location such as Applications.
 
-The initial release is experimental, ad hoc signed, and not notarized. macOS may require approving the app in System Settings → Privacy & Security before it opens. The deployment target is macOS 13; runtime validation has been performed on macOS 27, Apple Silicon. Compatibility with other macOS versions is not yet verified.
+The release is experimental, ad hoc signed, and not notarized. macOS may require approving the app in System Settings → Privacy & Security before it opens. The deployment target is macOS 13; runtime validation has been performed on macOS 27, Apple Silicon. Compatibility with other macOS versions is not yet verified.
 
 1. Open CmdTabo and click **Grant Accessibility**. Enable it in System Settings → Privacy & Security → Accessibility. On macOS 27 this pane is named **Device Control and Data Access**.
 2. Hold ⌘ and press Tab to move forward; ⌘⇧Tab moves backward.
@@ -38,6 +38,7 @@ Requires Xcode or Swift command-line tools and the macOS SDK. There are no exter
 
 ```sh
 swift test
+python3 -m unittest discover -s tests -p 'test_*.py'
 bash scripts/package-app.sh release
 open build/CmdTabo.app
 build/CmdTabo.app/Contents/MacOS/CmdTabo --self-test-windows
@@ -48,7 +49,7 @@ The window probe creates only its own disposable windows and checks real WindowS
 
 ```sh
 bash scripts/package-release.sh
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.0-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.1-macos-arm64.zip
 ```
 
 Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It generates a SHA-256 checksum file alongside the ZIP. Build output and diagnostic data are ignored by Git.
@@ -58,8 +59,8 @@ Release packaging remaps source paths, strips debug information, removes extende
 - AppKit presents a nonactivating panel and reuses its views while the app list stays unchanged. Changing selection updates the highlight and label.
 - `NSRunningApplication.isHidden` and workspace notifications track hidden apps without another permission.
 - A session event tap consumes ⌘Tab. After the tap starts, the private `CGSSetSymbolicHotKeyEnabled` API disables symbolic hotkeys 1 and 2, preserving their previous values. It does not change ⌘` or other shortcuts.
-- A temporary child process restores those values if the main process crashes or is force-quit. It exits on normal restoration and is not installed as a service.
-- SkyLight is loaded dynamically to query window tags in a batch. Bit 60 indicates minimization; bits 56/57 and visible-window history distinguish user windows from invisible helpers. History rescues recognized hidden windows, not closed-but-retained NSWindows.
+- An exclusive file lock prevents another instance from reading or changing the shortcuts while they are owned. A temporary child process inherits the lock and restores the original values if the main process crashes or is force-quit. The lock remains held until restoration finishes. The child exits on normal restoration and is not installed as a service. Failed keyboard recovery also restores the native shortcuts.
+- SkyLight is loaded dynamically to query window tags in a batch. Bit 60 indicates minimization; user-window markers and visible-window history distinguish user windows from invisible helpers. Hidden apps' normal-window markers also count at startup, before any visible-window history exists. Closed-window markers remain excluded; unknown states keep apps available.
 - CoreGraphics supplies window bounds and display geometry. Being on another Space does not by itself mean a window is minimized.
 - Window metadata refreshes approximately every 400 ms in the background. Ordering starts from window order and then follows app activations during the session.
 

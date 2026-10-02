@@ -49,7 +49,19 @@ final class WindowProbe: NSObject, NSApplicationDelegate {
                 WindowFilter.exclusion(windows: own, displays: connectedDisplays(), target: nil, isHidden: NSRunningApplication.current.isHidden,
                                        options: FilterOptions(excludeHidden: false)) == nil
         case 7: name = "unhidden"; valid = !NSRunningApplication.current.isHidden && first?.onScreen == true && reason == nil
-        default: name = "no windows"; valid = own.filter(\.isUserWindow).isEmpty && reason == nil
+        case 8: name = "no windows"; valid = own.filter(\.isUserWindow).isEmpty && reason == nil
+        case 9:
+            name = "cold-start hidden with one minimized"
+            let fresh = (WindowServer().snapshot() ?? []).filter { $0.pid == ProcessInfo.processInfo.processIdentifier }
+            valid = NSRunningApplication.current.isHidden && second?.minimized == true &&
+                WindowFilter.exclusion(windows: fresh, displays: connectedDisplays(), target: nil, isHidden: true,
+                                       options: FilterOptions(excludeHidden: false)) == nil
+        default:
+            name = "cold-start hidden with all minimized"
+            let fresh = (WindowServer().snapshot() ?? []).filter { $0.pid == ProcessInfo.processInfo.processIdentifier }
+            valid = NSRunningApplication.current.isHidden && first?.minimized == true && second?.minimized == true &&
+                WindowFilter.exclusion(windows: fresh, displays: connectedDisplays(), target: nil, isHidden: true,
+                                       options: FilterOptions(excludeHidden: false)) == .minimized
         }
         guard valid else {
             if attempts >= 40 {
@@ -69,7 +81,15 @@ final class WindowProbe: NSObject, NSApplicationDelegate {
         case 5: break
         case 6: NSApp.unhide(nil); windows[0].makeKeyAndOrderFront(nil)
         case 7: windows.forEach { $0.close() }
-        default: print("RESULT 9 checks passed"); timer?.invalidate(); exit(0)
+        case 8:
+            windows.forEach { $0.makeKeyAndOrderFront(nil) }
+            windows[1].miniaturize(nil)
+            NSApp.hide(nil)
+        case 9: windows[0].miniaturize(nil)
+        default:
+            NSApp.unhide(nil)
+            windows.forEach { $0.close() }
+            print("RESULT 11 checks passed"); timer?.invalidate(); exit(0)
         }
         stage += 1
     }

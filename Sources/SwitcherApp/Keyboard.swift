@@ -1,6 +1,6 @@
 import AppKit
 
-final class Keyboard {
+final class Keyboard: KeyboardCapture {
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var swallowed: Set<Int64> = []
@@ -29,7 +29,7 @@ final class Keyboard {
         source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: port, enable: true)
-        return true
+        return running
     }
     func stop() {
         onCancel()
@@ -37,7 +37,7 @@ final class Keyboard {
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         tap = nil; source = nil; swallowed.removeAll()
     }
-    private func handle(type: CGEventType, event: CGEvent) -> Bool {
+    func handle(type: CGEventType, event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             onCancel()
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }

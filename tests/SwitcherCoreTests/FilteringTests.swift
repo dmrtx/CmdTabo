@@ -80,6 +80,27 @@ final class FilteringTests: XCTestCase {
         closed.knownUserWindow = true
         XCTAssertEqual(WindowFilter.exclusion(windows: [closed, window(2, tags: 0x1300000100480001)], displays: screens, target: nil), .minimized)
     }
+    func testColdStartHiddenWindowKeepsPartiallyMinimizedApp() {
+        let windows = [window(tags: 0x0000008100480001), window(2, tags: 0x1300000100480001)]
+        XCTAssertNil(WindowFilter.exclusion(windows: windows, displays: screens, target: nil,
+                                            isHidden: true, options: FilterOptions(excludeHidden: false)))
+        XCTAssertEqual(WindowFilter.exclusion(windows: windows, displays: screens, target: nil,
+                                              isHidden: true), .hidden)
+    }
+    func testColdStartHiddenWindowsKeepDisplayMembership() {
+        let windows = [window(x: -1000, tags: 0x0000008100480001), window(2, tags: 0x1300000100480001)]
+        XCTAssertEqual(WindowFilter.exclusion(windows: windows, displays: screens, target: 1,
+                                              isHidden: true, options: FilterOptions(excludeHidden: false)), .otherDisplay)
+        XCTAssertNil(WindowFilter.exclusion(windows: windows, displays: screens, target: 2,
+                                            isHidden: true, options: FilterOptions(excludeHidden: false)))
+    }
+    func testHiddenHelpersAndRetainedClosedWindowsDoNotRescueMinimizedApp() {
+        for tags: UInt64 in [0x0000008100080001, 0x0000000100480001] {
+            let windows = [window(tags: tags), window(2, tags: 0x1300000100480001)]
+            XCTAssertEqual(WindowFilter.exclusion(windows: windows, displays: screens, target: nil,
+                                                  isHidden: true, options: FilterOptions(excludeHidden: false)), .minimized)
+        }
+    }
     func testOtherMonitorExcluded() {
         XCTAssertEqual(WindowFilter.exclusion(windows: [window(x: -1000)], displays: screens, target: 1), .otherDisplay)
     }

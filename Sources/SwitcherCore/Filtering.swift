@@ -21,10 +21,16 @@ public struct WindowState {
     // WindowServer fields measured by Switcher; verified by our runtime probe.
     public var minimized: Bool { !onScreen && tags.map { $0 & (1 << 60) != 0 } == true }
     public var isUserWindow: Bool {
+        isUserWindow(appIsHidden: false)
+    }
+    public func isUserWindow(appIsHidden: Bool) -> Bool {
         guard !onScreen, let tags else { return true }
         // Closed-but-retained NSWindows also remain in CGWindowList. History
-        // rescues a known hidden window, not a closed or ordered-out helper.
-        return tags & 0x1300000000000000 != 0 || (knownUserWindow && tags & (1 << 39) != 0)
+        // or app visibility rescues hidden windows even at cold start. Normal
+        // closed-window markers lack bit 39; helpers lack normal-window bit 22.
+        // A stale hidden marker is ambiguous and conservatively stays eligible.
+        let hiddenWindow = tags & (1 << 39) != 0 && tags & (1 << 22) != 0
+        return tags & 0x1300000000000000 != 0 || (hiddenWindow && (knownUserWindow || appIsHidden))
     }
 }
 
@@ -53,7 +59,7 @@ public enum WindowFilter {
     public static func exclusion(windows: [WindowState], displays: [Display], target: UInt32?,
                                  isHidden: Bool = false, options: FilterOptions = FilterOptions()) -> Exclusion? {
         if options.excludeHidden && isHidden { return .hidden }
-        let real = windows.filter(\.isUserWindow)
+        let real = windows.filter { $0.isUserWindow(appIsHidden: isHidden) }
         guard !real.isEmpty else { return nil }
         let available = options.excludeMinimized ? real.filter { !$0.minimized } : real
         guard !available.isEmpty else { return .minimized }

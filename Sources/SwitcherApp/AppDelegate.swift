@@ -4,15 +4,15 @@ import SwitcherCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let catalog = AppCatalog()
-    private let keyboard = Keyboard()
+    let keyboard = Keyboard()
     private let nativeCommandTab = NativeCommandTab()
     private let overlay = SwitcherPanel()
-    private var selection = Selection()
+    var selection = Selection()
     private var sessionEntries: [AppEntry] = []
     private var sessionScreen: NSScreen?
     private var target: UInt32?
-    private var showing = false
-    private var preview = false
+    var showing = false
+    var preview = false
     private var renderQueued = false
     private var statusItem: NSStatusItem!
     private var settings: NSWindow!
@@ -74,12 +74,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else { reconcilePermissions() }
         NSLog("CmdTabo started; SkyLight=%@; displays=%d", catalog.server.available.description, connectedDisplays().count)
     }
-    private func configureKeyboard() {
+    func configureKeyboard() {
         keyboard.isShowing = { [weak self] in self?.showing == true }
         keyboard.canBegin = { [weak self] in self?.catalog.ready == true }
         keyboard.onTab = { [weak self] backwards in
             guard let self else { return }
-            if self.showing { self.selection.step(backwards ? -1 : 1); self.scheduleRender() }
+            if self.showing {
+                self.preview = false
+                self.selection.step(backwards ? -1 : 1)
+                self.scheduleRender()
+            }
             else { self.begin(backwards: backwards, preview: false) }
         }
         keyboard.onStep = { [weak self] delta in self?.selection.step(delta); self?.scheduleRender() }
@@ -123,14 +127,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.hide()
     }
     private func reconcilePermissions() {
-        if enabled && AXIsProcessTrusted() && catalog.ready {
-            if !keyboard.running {
-                if keyboard.start() && !nativeCommandTab.takeOver() { keyboard.stop() }
-            }
-        } else {
-            nativeCommandTab.restore()
-            if keyboard.running { keyboard.stop() }
-        }
+        KeyboardOwnership.reconcile(eligible: enabled && AXIsProcessTrusted() && catalog.ready,
+                                    keyboard: keyboard, native: nativeCommandTab)
         updateStatus()
     }
     private func updateStatus() {
