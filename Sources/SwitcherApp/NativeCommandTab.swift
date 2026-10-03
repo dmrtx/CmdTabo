@@ -98,6 +98,12 @@ final class NativeCommandTab: NativeShortcutOwnership {
             releaseOwnership()
             return false
         }
+        // Never let a stuck guardian fill the pipe and block the main thread.
+        let descriptor = pipe.fileHandleForWriting.fileDescriptor
+        guard fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK) == 0 else {
+            releaseOwnership()
+            return false
+        }
         process.standardInput = pipe
         process.standardOutput = FileHandle.nullDevice
         // dup2 inherits the same flock through stderr. The guardian keeps it
@@ -119,7 +125,7 @@ final class NativeCommandTab: NativeShortcutOwnership {
         guardianInput = pipe.fileHandleForWriting
         saved = previous
         guard apply([false, false]) else { restore(); return false }
-        NSLog("CmdTabo native switcher disabled; restore guard pid=%d", process.processIdentifier)
+        DiagnosticLog.shared.record("native switcher disabled guardian=\(process.processIdentifier)")
         return true
     }
     func restore() {
@@ -134,11 +140,47 @@ final class NativeCommandTab: NativeShortcutOwnership {
         guardian = nil
         // Closing our descriptor does not unlock the guardian's inherited one.
         releaseOwnership()
-        NSLog("CmdTabo native switcher restored=%@", restored.description)
+        DiagnosticLog.shared.record("native switcher restored=\(restored)")
+    }
+    @discardableResult func heartbeat() -> Bool {
+        guard isOverridden, let guardianInput else { return true }
+        do { try guardianInput.write(contentsOf: Data(".".utf8)); return true }
+        catch { DiagnosticLog.shared.record("guardian heartbeat failed"); return false }
     }
     static func runGuardian(previous: [Bool]) {
-        let input = FileHandle.standardInput.readDataToEndOfFile()
-        if input != Data("cancel".utf8) { _ = NativeCommandTab().apply(previous) }
+        monitorGuardian(input: STDIN_FILENO, parent: getppid(), restore: {
+            let restored = NativeCommandTab().apply(previous)
+            DiagnosticLog.shared.record("guardian restored native shortcuts=\(restored)")
+            DiagnosticLog.shared.flush()
+        })
+    }
+    /// Runs in the child, independently of AppKit and the parent's run loop.
+    static func monitorGuardian(input: Int32, parent: pid_t, timeout: TimeInterval = 15,
+                                restore: () -> Void) {
+        // This clock excludes sleep, so closing the laptop cannot exhaust the lease.
+        func uptime() -> TimeInterval { Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1_000_000_000 }
+        var lease = GuardianLease(now: uptime(), timeout: timeout)
+        var descriptor = pollfd(fd: input, events: Int16(POLLIN | POLLHUP), revents: 0)
+        var buffer = [UInt8](repeating: 0, count: 256)
+        while true {
+            let result = poll(&descriptor, 1, 250)
+            if result < 0 {
+                if errno == EINTR { continue }
+                restore(); return
+            }
+            if result > 0 {
+                let count = read(input, &buffer, buffer.count)
+                if count <= 0 { restore(); return }
+                if lease.receive(Data(buffer.prefix(count)), now: uptime()) { return }
+            }
+            if lease.expired(now: uptime()) {
+                DiagnosticLog.shared.record("guardian main-thread heartbeat timeout; stopping capture owner")
+                // Only terminate our still-current parent, never an unrelated PID.
+                // Its death removes the tap before we restore the native shortcuts.
+                if parent > 1 && getppid() == parent { _ = kill(parent, SIGKILL) }
+                restore(); return
+            }
+        }
     }
     deinit { restore() }
 }

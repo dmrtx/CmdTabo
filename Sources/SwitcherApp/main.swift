@@ -2,7 +2,12 @@ import AppKit
 import ApplicationServices
 import SwitcherCore
 
-if CommandLine.arguments.contains("--guard-native-command-tab") {
+if CommandLine.arguments.contains("--accessibility-status") {
+    // Bound the helper even if the system trust query itself stops responding.
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 4) { exit(2) }
+    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
+    print(AXIsProcessTrustedWithOptions(options) ? "trusted" : "untrusted")
+} else if CommandLine.arguments.contains("--guard-native-command-tab") {
     let arguments = CommandLine.arguments
     guard arguments.count == 4, ["0", "1"].contains(arguments[2]), ["0", "1"].contains(arguments[3]) else { exit(2) }
     NativeCommandTab.runGuardian(previous: [arguments[2] == "1", arguments[3] == "1"])

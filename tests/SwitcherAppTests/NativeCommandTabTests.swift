@@ -171,4 +171,55 @@ final class NativeCommandTabTests: XCTestCase {
         waitUntil { second.takeOver() }
         second.restore()
     }
+
+    func testWatchdogKillsHungOwnerAndRestoresBeforeReleasingLock() throws {
+        let environment = ProcessInfo.processInfo.environment
+        if let fixture = environment["CMDTABO_WATCHDOG_GUARDIAN"] {
+            let state = URL(fileURLWithPath: fixture).appendingPathComponent("states")
+            NativeCommandTab.monitorGuardian(input: STDIN_FILENO, parent: getppid(), timeout: 0.8) {
+                try! Data("1 0".utf8).write(to: state, options: .atomic)
+            }
+            exit(0)
+        }
+        if let fixture = environment["CMDTABO_WATCHDOG_OWNER"] {
+            let state = URL(fileURLWithPath: fixture).appendingPathComponent("states")
+            let owner = NativeCommandTab(lockURL: URL(fileURLWithPath: fixture).appendingPathComponent("ownership.lock"),
+                readStates: { [true, false] }, writeStates: { values in
+                    try! Data(values.map { $0 ? "1" : "0" }.joined(separator: " ").utf8).write(to: state, options: .atomic)
+                    return true
+                }, makeGuardian: { _ in
+                    let child = Process()
+                    child.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+                    child.arguments = ["xctest", "-XCTest", "SwitcherAppTests.NativeCommandTabTests/testWatchdogKillsHungOwnerAndRestoresBeforeReleasingLock",
+                                       Bundle(for: NativeCommandTabTests.self).bundleURL.path]
+                    var env = environment
+                    env.removeValue(forKey: "CMDTABO_WATCHDOG_OWNER")
+                    env["CMDTABO_WATCHDOG_GUARDIAN"] = fixture
+                    child.environment = env
+                    return child
+                })
+            guard owner.takeOver() else { exit(1) }
+            try Data().write(to: URL(fileURLWithPath: fixture).appendingPathComponent("ready"))
+            while true { Thread.sleep(forTimeInterval: 0.01) }
+        }
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        child.arguments = ["xctest", "-XCTest", "SwitcherAppTests.NativeCommandTabTests/testWatchdogKillsHungOwnerAndRestoresBeforeReleasingLock",
+                           Bundle(for: NativeCommandTabTests.self).bundleURL.path]
+        child.environment = environment.merging(["CMDTABO_WATCHDOG_OWNER": directory.path]) { _, new in new }
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        try child.run()
+        children.append(child)
+        waitUntil { FileManager.default.fileExists(atPath: self.directory.appendingPathComponent("ready").path) }
+        let successor = owner()
+        XCTAssertFalse(successor.takeOver())
+        XCTAssertEqual(states(), [false, false])
+        waitUntil { !child.isRunning }
+        XCTAssertEqual(child.terminationReason, .uncaughtSignal)
+        XCTAssertEqual(child.terminationStatus, SIGKILL)
+        waitUntil { self.states() == [true, false] }
+        waitUntil { successor.takeOver() }
+        successor.restore()
+    }
 }

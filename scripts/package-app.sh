@@ -11,6 +11,16 @@ MACOS_MIN_VERSION=${MACOS_MIN_VERSION:-13.0}
 MENU_BAR_APP=${MENU_BAR_APP:-1}
 SIGNING_MODE=${SIGNING_MODE:-}
 APP_IDENTITY=${APP_IDENTITY:-}
+APP="$ROOT/build/${APP_NAME}.app"
+
+ensure_app_stopped() {
+  if /bin/ps -axo comm= | /usr/bin/awk -v executable="$APP/Contents/MacOS/$APP_NAME" \
+      '$0 == executable { found = 1 } END { exit !found }'; then
+    echo "Close the packaged app and its recovery process before rebuilding it." >&2
+    exit 1
+  fi
+}
+ensure_app_stopped
 
 if [[ -f "$ROOT/version.env" ]]; then
   source "$ROOT/version.env"
@@ -38,7 +48,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
   swift build -c "$CONF" --arch "$ARCH" "${SWIFT_FLAGS[@]}"
 done
 
-APP="$ROOT/build/${APP_NAME}.app"
+ensure_app_stopped
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
@@ -55,6 +65,10 @@ if [[ "$MENU_BAR_APP" == "1" ]]; then
 fi
 
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "local")
+SOURCE_STATE=modified
+if git diff --quiet && git diff --cached --quiet && [[ -z "$(git ls-files --others --exclude-standard)" ]]; then
+  SOURCE_STATE=clean
+fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -72,6 +86,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSUIElement</key><${LSUI_VALUE}/>
     <key>CFBundleIconFile</key><string>Icon</string>
     <key>GitCommit</key><string>${GIT_COMMIT}</string>
+    <key>SourceState</key><string>${SOURCE_STATE}</string>
 </dict>
 </plist>
 PLIST

@@ -94,3 +94,88 @@ final class KeyboardOwnershipTests: XCTestCase {
         XCTAssertTrue(native.overridden)
     }
 }
+
+final class KeyboardRecoveryTests: XCTestCase {
+    private func event(_ key: CGKeyCode = 48, flags: CGEventFlags = .maskCommand) throws -> CGEvent {
+        let event = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: true))
+        event.flags = flags
+        return event
+    }
+    private func drain() {
+        let done = expectation(description: "main queue drained")
+        DispatchQueue.main.async { done.fulfill() }
+        wait(for: [done], timeout: 2)
+    }
+    func testCallbackDefersWindowActionsAndKeepsRapidPressReleaseOrder() throws {
+        let keyboard = Keyboard()
+        var actions: [String] = []
+        keyboard.canBegin = { true }
+        keyboard.onTab = { _ in actions.append("tab") }
+        keyboard.onStep = { _ in actions.append("step") }
+        keyboard.onConfirm = { actions.append("confirm") }
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(124), deferred: true))
+        XCTAssertFalse(keyboard.handle(type: .flagsChanged, event: try event(55, flags: []), deferred: true))
+        XCTAssertEqual(actions, [])
+        drain()
+        XCTAssertEqual(actions, ["tab", "step", "confirm"])
+    }
+    func testStopInvalidatesQueuedActivationBeforeSleep() throws {
+        let keyboard = Keyboard()
+        var tabs = 0
+        keyboard.canBegin = { true }
+        keyboard.onTab = { _ in tabs += 1 }
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        keyboard.stop()
+        drain()
+        XCTAssertEqual(tabs, 0)
+        XCTAssertFalse(keyboard.handle(type: .keyUp, event: try event()))
+    }
+    func testDisabledTapFailsOpenAndDoesNotRunRecoveryInsideCallback() throws {
+        for type in [CGEventType.tapDisabledByTimeout, .tapDisabledByUserInput] {
+            let keyboard = Keyboard()
+            var failed = false, opened = false
+            keyboard.canBegin = { true }
+            keyboard.onTab = { _ in opened = true }
+            keyboard.onFailure = { failed = true }
+            XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+            XCTAssertFalse(keyboard.handle(type: type, event: try event(), deferred: true))
+            XCTAssertFalse(failed)
+            XCTAssertFalse(keyboard.handle(type: .keyDown, event: try event()))
+            XCTAssertFalse(keyboard.handle(type: .keyUp, event: try event()))
+            drain()
+            XCTAssertTrue(failed)
+            XCTAssertFalse(opened)
+        }
+    }
+    func testMousePreviewStillRequiresCommandTabBeforeConfirming() throws {
+        let keyboard = Keyboard()
+        var confirmed = false
+        keyboard.isShowing = { true }
+        keyboard.shouldConfirmOnCommandRelease = { false }
+        keyboard.onConfirm = { confirmed = true }
+        XCTAssertFalse(keyboard.handle(type: .flagsChanged, event: try event(55, flags: []), deferred: true))
+        drain()
+        XCTAssertFalse(confirmed)
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        XCTAssertFalse(keyboard.handle(type: .flagsChanged, event: try event(55, flags: []), deferred: true))
+        drain()
+        XCTAssertTrue(confirmed)
+    }
+}
+
+extension KeyboardRecoveryTests {
+    func testKeysAfterQueuedConfirmationPassThroughBeforePanelHides() throws {
+        let keyboard = Keyboard()
+        var visible = true
+        keyboard.isShowing = { visible }
+        keyboard.onConfirm = { visible = false }
+        XCTAssertFalse(keyboard.handle(type: .flagsChanged, event: try event(55, flags: []), deferred: true))
+        XCTAssertFalse(keyboard.handle(type: .keyDown, event: try event(124, flags: []), deferred: true))
+        drain()
+        XCTAssertFalse(visible)
+        visible = true // A later mouse preview must accept its navigation again.
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(124, flags: []), deferred: true))
+        drain()
+    }
+}

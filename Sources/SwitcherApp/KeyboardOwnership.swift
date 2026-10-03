@@ -10,20 +10,22 @@ protocol NativeShortcutOwnership: AnyObject {
 }
 
 enum KeyboardOwnership {
-    static func reconcile(eligible: Bool, keyboard: KeyboardCapture, native: NativeShortcutOwnership) {
+    @discardableResult static func reconcile(eligible: Bool, keyboard: KeyboardCapture, native: NativeShortcutOwnership) -> Bool {
         guard eligible else {
             native.restore()
             if keyboard.running { keyboard.stop() }
-            return
+            return true
         }
         guard keyboard.running || keyboard.start() else {
             native.restore()
             keyboard.stop()
-            return
+            return false
         }
         if !native.takeOver() {
             native.restore()
             keyboard.stop()
+            return false
         }
+        return true
     }
 }

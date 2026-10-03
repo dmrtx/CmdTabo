@@ -42,6 +42,7 @@ PATTERNS = {
 COMPILED = {name: re.compile(pattern) for name, pattern in PATTERNS.items()}
 IPV4 = re.compile(r'(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)')
 IPV6 = re.compile(r'(?<![\w:])(?:[0-9a-fA-F]{0,4}:){3,7}[0-9a-fA-F]{0,4}(?![\w:])')
+PUBLIC_EMAIL = re.compile(r'(?:\d+\+)?([A-Za-z0-9-]+(?:\[bot\])?)@users\.noreply\.github\.com', re.I)
 FORBIDDEN_FILES = re.compile(r'(?:^|/)(?:build|dist|\.build|\.swiftpm|__MACOSX)(?:/|$)|'
                              r'(?:^|/)(?:\.DS_Store|\._[^/]+|\.env(?:\.[^/]+)?)(?:$|/)|'
                              r'\.(?:log|err|pem|key|p12|pfx|mobileprovision|provisionprofile|zip|dylib)$', re.I)
@@ -70,6 +71,13 @@ def safe_label(label, hints):
         return label.split(':', 1)[0] + ':[redacted path]'
     # Keep filenames containing control characters on one diagnostic line.
     return ''.join(character if character.isprintable() else '?' for character in label)
+
+
+def public_identity(name, email):
+    if (name, email) == ('GitHub', 'noreply' + '@' + 'github.com'):
+        return True
+    match = PUBLIC_EMAIL.fullmatch(email)
+    return bool(match and name.casefold() == match.group(1).casefold())
 
 
 def main():
@@ -136,10 +144,13 @@ def main():
             if object_id not in scanned and git('cat-file', '-t', object_id).strip() == b'blob':
                 inspect('history:' + object_id.decode()[:12], git('cat-file', 'blob', object_id))
                 scanned.add(object_id)
-        # Author/committer email metadata is intentionally permitted. Messages
-        # and file contents are still checked for personal data and credentials.
+        # Public handles with GitHub noreply addresses are the only identities
+        # permitted in author/committer metadata. Never print rejected values.
         for commit in git('rev-list', '--all').decode().splitlines():
             inspect('commit:' + commit[:12], git('show', '-s', '--format=%B', commit))
+            identity = git('show', '-s', '--format=%an%x00%ae%x00%cn%x00%ce', commit).decode().rstrip('\n').split('\0')
+            if len(identity) != 4 or not (public_identity(*identity[:2]) and public_identity(*identity[2:])):
+                issues.append(('commit:' + commit[:12], 'non-public author or committer identity'))
 
     if args.archive:
         with zipfile.ZipFile(args.archive) as archive:

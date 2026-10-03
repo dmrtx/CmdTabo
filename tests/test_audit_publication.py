@@ -20,7 +20,7 @@ class PublicationAuditTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.git('init', '-q')
         self.git('config', 'user.name', 'Fixture')
-        self.git('config', 'user.email', 'fixture' + '@' + 'example.invalid')
+        self.git('config', 'user.email', 'fixture' + '@' + 'users.noreply.github.com')
         self.private_name = 'synthetic' + '@' + 'example.invalid'
 
     def tearDown(self):
@@ -122,6 +122,22 @@ class PublicationAuditTests(unittest.TestCase):
         result = self.run_audit('--archive', str(path))
         self.assertEqual(result.returncode, 2)
         self.assertNotIn(self.private_name, result.stdout + result.stderr)
+
+    def test_history_allows_only_public_handle_and_noreply_metadata(self):
+        self.add('safe.txt')
+        self.git('commit', '-qm', 'Public fixture')
+        self.assertEqual(self.run_audit('--history').returncode, 0)
+        self.git('config', 'user.email', self.private_name)
+        self.add('another.txt')
+        self.git('commit', '-qm', 'Private metadata fixture')
+        result = self.run_audit('--history')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('non-public author or committer identity', result.stdout)
+        self.assertNotIn(self.private_name, result.stdout + result.stderr)
+
+    def test_full_name_is_not_permitted_even_with_noreply_address(self):
+        self.assertFalse(audit.public_identity('Synthetic Full Name', 'fixture' + '@' + 'users.noreply.github.com'))
+        self.assertTrue(audit.public_identity('Fixture', '123+fixture' + '@' + 'users.noreply.github.com'))
 
 
 if __name__ == '__main__':
