@@ -139,6 +139,73 @@ class PublicationAuditTests(unittest.TestCase):
         self.assertFalse(audit.public_identity('Synthetic Full Name', 'fixture' + '@' + 'users.noreply.github.com'))
         self.assertTrue(audit.public_identity('Fixture', '123+fixture' + '@' + 'users.noreply.github.com'))
 
+    def commit_fixture(self):
+        self.add('safe.txt')
+        self.git('commit', '-qm', 'Public fixture')
+
+    def assert_private_tag_failure(self, result, *values):
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('tag:', result.stdout)
+        for value in values:
+            self.assertNotIn(value, result.stdout + result.stderr)
+
+    def test_history_accepts_public_annotated_and_lightweight_tags(self):
+        self.commit_fixture()
+        self.git('tag', '-a', 'v-public', '-m', 'Public release')
+        self.git('tag', 'v-lightweight')
+        result = self.run_audit('--history')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_history_rejects_private_tagger_without_printing_identity(self):
+        self.commit_fixture()
+        self.git('config', 'user.email', self.private_name)
+        self.git('tag', '-a', 'v-private', '-m', 'Release')
+        self.assert_private_tag_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_rejects_full_name_tagger_with_noreply(self):
+        self.commit_fixture()
+        self.git('config', 'user.name', 'Synthetic Full Name')
+        self.git('tag', '-a', 'v-private', '-m', 'Release')
+        self.assert_private_tag_failure(self.run_audit('--history'), 'Synthetic Full Name')
+
+    def test_history_rejects_private_tag_message_and_name(self):
+        self.commit_fixture()
+        self.git('tag', '-a', self.private_name, '-m', 'Contact: ' + self.private_name)
+        self.assert_private_tag_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_rejects_private_tag_name_with_public_message(self):
+        self.commit_fixture()
+        self.git('tag', '-a', self.private_name, '-m', 'Public release')
+        self.assert_private_tag_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_checks_tag_ref_aliases_and_lightweight_names(self):
+        self.commit_fixture()
+        self.git('tag', '-a', 'v-public', '-m', 'Public release')
+        target = self.git('rev-parse', 'v-public').decode().strip()
+        self.git('update-ref', 'refs/tags/' + self.private_name, target)
+        self.assert_redacted_failure(self.run_audit('--history'), self.private_name)
+        self.git('tag', '-d', self.private_name)
+        self.git('tag', self.private_name)
+        self.assert_redacted_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_checks_additional_tag_headers(self):
+        self.commit_fixture()
+        target = self.git('rev-parse', 'HEAD').decode().strip()
+        raw = (f'object {target}\ntype commit\ntag v-fixture\n'
+               'tagger Fixture <fixture' + '@' + 'users.noreply.github.com> 1 +0000\n'
+               'extra ' + self.private_name + '\n\nPublic release\n')
+        object_id = subprocess.run(['git', '-C', str(self.root), 'hash-object', '-w', '-t', 'tag', '--stdin'],
+                                   input=raw.encode(), check=True, capture_output=True).stdout.decode().strip()
+        self.git('update-ref', 'refs/tags/v-fixture', object_id)
+        self.assert_private_tag_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_checks_inner_tag_reachable_only_through_outer_tag(self):
+        self.commit_fixture()
+        self.git('tag', '-a', 'v-inner', '-m', 'Contact: ' + self.private_name)
+        self.git('tag', '-a', 'v-outer', 'v-inner', '-m', 'Public wrapper')
+        self.git('tag', '-d', 'v-inner')
+        self.assert_private_tag_failure(self.run_audit('--history'), self.private_name)
+
 
 if __name__ == '__main__':
     unittest.main()

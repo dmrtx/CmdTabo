@@ -82,7 +82,7 @@ def public_identity(name, email):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--history', action='store_true', help='Also inspect all reachable Git blobs and commit messages.')
+    parser.add_argument('--history', action='store_true', help='Also inspect reachable Git history and annotated tags.')
     parser.add_argument('--archive', type=Path, help='Also inspect an app-only release ZIP.')
     args = parser.parse_args()
     git('rev-parse', '--git-dir')
@@ -121,6 +121,10 @@ def main():
         scanned.add(object_id)
 
     if args.history:
+        # Ref aliases can differ from the name stored inside an annotated tag.
+        for name in git('for-each-ref', '--format=%(refname)', 'refs/tags').splitlines():
+            path = os.fsdecode(name)
+            inspect_path('tag-ref:' + path, path, source=False)
         # rev-list --objects reports only one name for a reused blob. Walk
         # every distinct commit tree with NUL delimiters to retain renamed
         # paths, directory names, and filenames containing newlines.
@@ -139,11 +143,41 @@ def main():
                 if kind == b'blob' and object_id not in scanned:
                     inspect('history:' + path, git('cat-file', 'blob', object_id))
                     scanned.add(object_id)
-        # Include blobs directly referenced by tags as well as commit trees.
-        for object_id in git('rev-list', '--objects', '--all', '--no-object-names').splitlines():
-            if object_id not in scanned and git('cat-file', '-t', object_id).strip() == b'blob':
+        # Include direct blob refs and every reachable annotated tag, including
+        # inner tags whose only remaining reference is another tag object.
+        objects = list(git('rev-list', '--objects', '--all', '--no-object-names').splitlines())
+        visited = set()
+        while objects:
+            object_id = objects.pop()
+            if object_id in visited:
+                continue
+            visited.add(object_id)
+            kind = git('cat-file', '-t', object_id).strip()
+            if kind == b'blob' and object_id not in scanned:
                 inspect('history:' + object_id.decode()[:12], git('cat-file', 'blob', object_id))
                 scanned.add(object_id)
+            elif kind == b'tag':
+                label = 'tag:' + object_id.decode()[:12]
+                headers, _, message = git('cat-file', 'tag', object_id).partition(b'\n\n')
+                taggers = []
+                for header in headers.splitlines():
+                    if header.startswith(b'tagger '):
+                        taggers.append(header)
+                    else:
+                        inspect(label, header)
+                        if header.startswith(b'object '):
+                            target = header[7:]
+                            if re.fullmatch(rb'[0-9a-f]{40}|[0-9a-f]{64}', target):
+                                objects.append(target)
+                valid_tagger = len(taggers) == 1
+                for tagger in taggers:
+                    identity = re.fullmatch(r'tagger (.+) <([^<>]+)> (-?\d+) ([+-]\d{4})',
+                                            tagger.decode('utf-8', errors='replace'))
+                    valid_tagger = valid_tagger and bool(identity and public_identity(*identity.groups()[:2]))
+                if not valid_tagger:
+                    issues.append((label, 'non-public or malformed tagger identity'))
+                # Allowed noreply metadata is checked above, not as content.
+                inspect(label, message)
         # Public handles with GitHub noreply addresses are the only identities
         # permitted in author/committer metadata. Never print rejected values.
         for commit in git('rev-list', '--all').decode().splitlines():

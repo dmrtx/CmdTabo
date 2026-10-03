@@ -8,7 +8,9 @@ final class Keyboard: KeyboardCapture {
     private var queuedSession: Bool?
     private var actionID = 0
     private var generation = 0
+    private var deliveringAction = false
     private var failed = false
+    private var failurePending = false
     var isShowing: () -> Bool = { false }
     var canBegin: () -> Bool = { false }
     var onTab: (Bool) -> Void = { _ in }
@@ -20,6 +22,8 @@ final class Keyboard: KeyboardCapture {
     var running: Bool { tap.map { CGEvent.tapIsEnabled(tap: $0) } ?? false }
 
     func start() -> Bool {
+        // A queued failure must reach the coordinator before any new acquisition.
+        guard !failurePending else { return false }
         if running { return true }
         stop()
         failed = false
@@ -47,35 +51,59 @@ final class Keyboard: KeyboardCapture {
         if let tap { CGEvent.tapEnable(tap: tap, enable: false); CFMachPortInvalidate(tap) }
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         if tap != nil { DiagnosticLog.shared.record("capture stopped") }
-        generation += 1
-        pendingSession = false
-        queuedSession = nil
+        discardSession()
         tap = nil; source = nil; swallowed.removeAll()
         onCancel()
     }
+    func endSession() {
+        // Keyboard-driven closes already have ordered session transitions.
+        // Keep a subsequent Tab queued after that close; external closes must
+        // instead discard all pending selector actions.
+        if !deliveringAction { discardSession() }
+    }
+    private func discardSession() {
+        generation += 1
+        pendingSession = false
+        queuedSession = nil
+        // Preserve key-up pairing for key-down events already consumed.
+    }
     private func deliver(deferred: Bool, session: Bool? = nil, _ action: @escaping () -> Void) {
-        if !deferred { action(); return }
+        if !deferred { perform(action); return }
         if let session { queuedSession = session }
         actionID += 1
         let queuedAction = actionID
         let current = generation
         DispatchQueue.main.async { [weak self] in
             guard let self, self.generation == current else { return }
-            action()
+            self.perform(action)
             if self.actionID == queuedAction { self.queuedSession = nil }
         }
+    }
+    private func perform(_ action: () -> Void) {
+        let previous = deliveringAction
+        deliveringAction = true
+        defer { deliveringAction = previous }
+        action()
     }
     func handle(type: CGEventType, event: CGEvent, deferred: Bool = false) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             // Return to WindowServer before touching windows or shortcuts.
             // Never re-enable a tap that macOS disabled for safety.
+            guard !failed else { return false }
             failed = true
-            pendingSession = false
-            queuedSession = nil
+            failurePending = true
+            discardSession()
             swallowed.removeAll()
-            generation += 1
             DiagnosticLog.shared.record(type == .tapDisabledByTimeout ? "capture disabled: timeout" : "capture disabled: user input")
-            deliver(deferred: deferred, session: false) { [weak self] in self?.onCancel(); self?.onFailure() }
+            // Failure delivery is independent of cancellable selector actions.
+            let notify = { [weak self] in
+                guard let self else { return }
+                self.onCancel()
+                self.onFailure()
+                self.failurePending = false
+            }
+            if deferred { DispatchQueue.main.async(execute: notify) }
+            else { notify() }
             return false
         }
         guard !failed else { return false }
@@ -96,7 +124,12 @@ final class Keyboard: KeyboardCapture {
             swallowed.insert(key)
             pendingSession = true
             let backwards = event.flags.contains(.maskShift)
-            deliver(deferred: deferred, session: true) { [weak self] in self?.onTab(backwards) }
+            deliver(deferred: deferred, session: true) { [weak self] in
+                self?.onTab(backwards)
+                // Once delivered, visibility is owned by the delegate, even if
+                // opening was rejected or the panel is subsequently closed.
+                self?.pendingSession = false
+            }
             return true
         }
         guard sessionShowing else { return false }

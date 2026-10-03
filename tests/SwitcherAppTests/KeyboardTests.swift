@@ -165,6 +165,106 @@ final class KeyboardRecoveryTests: XCTestCase {
 }
 
 extension KeyboardRecoveryTests {
+    func testMouseConfirmationEndsSessionAndPreservesConsumedKeyUp() throws {
+        let keyboard = Keyboard()
+        var showing = false
+        keyboard.canBegin = { true }
+        keyboard.isShowing = { showing }
+        keyboard.onTab = { _ in showing = true }
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        drain()
+        XCTAssertTrue(showing)
+        showing = false // Overlay confirmation closed the panel.
+        for key: CGKeyCode in [123, 124, 126, 125, 36, 76, 53] {
+            XCTAssertFalse(keyboard.handle(type: .keyDown, event: try event(key), deferred: true))
+        }
+        XCTAssertTrue(keyboard.handle(type: .keyUp, event: try event()))
+        XCTAssertFalse(keyboard.handle(type: .keyUp, event: try event()))
+        drain()
+    }
+
+    func testRejectedStartDoesNotLeaveAnInvisibleSession() throws {
+        let keyboard = Keyboard()
+        keyboard.canBegin = { true }
+        // The catalog became unavailable before onTab could open the panel.
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        drain()
+        XCTAssertFalse(keyboard.handle(type: .keyDown, event: try event(124), deferred: true))
+        XCTAssertTrue(keyboard.handle(type: .keyUp, event: try event()))
+        drain()
+    }
+
+    func testDelegateCancellationDiscardsPendingOpenWithoutStoppingCapture() throws {
+        let delegate = AppDelegate()
+        delegate.configureKeyboard()
+        let keyboard = delegate.keyboard
+        var openings = 0
+        keyboard.canBegin = { true }
+        keyboard.onTab = { _ in openings += 1; delegate.showing = true }
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        // Settings, filters and overlay confirmation share this cancellation route.
+        keyboard.onCancel()
+        drain()
+        XCTAssertFalse(delegate.showing)
+        XCTAssertEqual(openings, 0)
+        XCTAssertFalse(keyboard.handle(type: .keyDown, event: try event(124), deferred: true))
+        XCTAssertTrue(keyboard.handle(type: .keyUp, event: try event()))
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        drain()
+        XCTAssertEqual(openings, 1)
+        keyboard.onCancel()
+    }
+
+    func testRapidConsecutiveSessionsKeepTheSecondOpening() throws {
+        let delegate = AppDelegate()
+        delegate.configureKeyboard()
+        let keyboard = delegate.keyboard
+        var openings = 0
+        keyboard.canBegin = { true }
+        keyboard.onTab = { _ in openings += 1; delegate.showing = true }
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        XCTAssertFalse(keyboard.handle(type: .flagsChanged, event: try event(55, flags: []), deferred: true))
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        drain()
+        XCTAssertEqual(openings, 2)
+        XCTAssertTrue(delegate.showing)
+        keyboard.onCancel()
+    }
+
+    func testTapFailureSurvivesSuspensionBeforeDeferredDelivery() throws {
+        for type in [CGEventType.tapDisabledByTimeout, .tapDisabledByUserInput] {
+            let keyboard = Keyboard()
+            var lifecycle = CaptureLifecycle()
+            keyboard.onFailure = { lifecycle.fail() }
+            lifecycle.onRelease = { keyboard.stop() }
+            XCTAssertFalse(keyboard.handle(type: type, event: try event(), deferred: true))
+            lifecycle.suspend(.systemSleep)
+            drain()
+            lifecycle.resume(.systemSleep, now: 100)
+            XCTAssertTrue(lifecycle.failed)
+            XCTAssertFalse(lifecycle.permitsCapture(now: 103))
+            lifecycle.retry()
+            XCTAssertTrue(lifecycle.permitsCapture(now: 103))
+        }
+    }
+
+    func testReconciliationCannotAcquireWhileFailureDeliveryIsPending() throws {
+        let keyboard = Keyboard()
+        let native = KeyboardOwnershipTests.Native()
+        var lifecycle = CaptureLifecycle()
+        var failures = 0
+        keyboard.onFailure = { failures += 1; lifecycle.fail() }
+        lifecycle.onRelease = { keyboard.stop() }
+        XCTAssertFalse(keyboard.handle(type: .tapDisabledByTimeout, event: try event(), deferred: true))
+        XCTAssertFalse(KeyboardOwnership.reconcile(eligible: true, keyboard: keyboard, native: native))
+        XCTAssertFalse(native.overridden)
+        XCTAssertEqual(native.acquisitions, 0)
+        drain()
+        XCTAssertEqual(failures, 1)
+        XCTAssertTrue(lifecycle.failed)
+        XCTAssertFalse(lifecycle.permitsCapture(now: 103))
+    }
+
     func testKeysAfterQueuedConfirmationPassThroughBeforePanelHides() throws {
         let keyboard = Keyboard()
         var visible = true

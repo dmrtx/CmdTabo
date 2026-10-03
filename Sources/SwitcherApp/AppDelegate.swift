@@ -184,6 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { app?.activate(options: [.activateIgnoringOtherApps]) }
     }
     private func cancel() {
+        keyboard.endSession()
         showing = false; preview = false; selection.clear(); sessionEntries = []
         overlay.hide()
     }
