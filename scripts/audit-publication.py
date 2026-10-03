@@ -12,7 +12,9 @@ import zipfile
 
 
 def git(*args, check=True):
-    return subprocess.run(['git', *args], check=check, capture_output=True).stdout
+    # Push transfers the original objects, not the local replacement view.
+    environment = {**os.environ, 'GIT_NO_REPLACE_OBJECTS': '1'}
+    return subprocess.run(['git', *args], check=check, capture_output=True, env=environment).stdout
 
 
 def local_hints():
@@ -130,7 +132,12 @@ def main():
         # paths, directory names, and filenames containing newlines.
         trees = git('log', '--all', '--format=%T').splitlines()
         paths = set()
-        for tree in dict.fromkeys(trees):
+        scanned_trees = set()
+
+        def inspect_tree(tree):
+            if tree in scanned_trees:
+                return
+            scanned_trees.add(tree)
             for entry in git('ls-tree', '-r', '-t', '-z', tree.decode()).split(b'\0'):
                 if not entry:
                     continue
@@ -140,12 +147,17 @@ def main():
                 if path not in paths:
                     inspect_path('history:' + path, path)
                     paths.add(path)
-                if kind == b'blob' and object_id not in scanned:
+                if kind == b'tree':
+                    scanned_trees.add(object_id)
+                elif kind == b'blob' and object_id not in scanned:
                     inspect('history:' + path, git('cat-file', 'blob', object_id))
                     scanned.add(object_id)
+
+        for tree in dict.fromkeys(trees):
+            inspect_tree(tree)
         # Include direct blob refs and every reachable annotated tag, including
         # inner tags whose only remaining reference is another tag object.
-        objects = list(git('rev-list', '--objects', '--all', '--no-object-names').splitlines())
+        objects = list(reversed(git('rev-list', '--objects', '--all', '--no-object-names').splitlines()))
         visited = set()
         while objects:
             object_id = objects.pop()
@@ -156,6 +168,9 @@ def main():
             if kind == b'blob' and object_id not in scanned:
                 inspect('history:' + object_id.decode()[:12], git('cat-file', 'blob', object_id))
                 scanned.add(object_id)
+            elif kind == b'tree':
+                # Tags may publish trees that no reachable commit references.
+                inspect_tree(object_id)
             elif kind == b'tag':
                 label = 'tag:' + object_id.decode()[:12]
                 headers, _, message = git('cat-file', 'tag', object_id).partition(b'\n\n')

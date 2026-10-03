@@ -206,6 +206,23 @@ class PublicationAuditTests(unittest.TestCase):
         self.git('tag', '-d', 'v-inner')
         self.assert_private_tag_failure(self.run_audit('--history'), self.private_name)
 
+    def test_history_checks_paths_in_tree_referenced_only_by_tag(self):
+        self.commit_fixture()
+        self.add('nested/' + self.private_name + '.txt')
+        tree = self.git('write-tree').decode().strip()
+        self.git('tag', '-a', 'v-tree', tree, '-m', 'Public release')
+        self.git('reset', '--hard', 'HEAD')
+        self.assert_redacted_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_reads_original_tag_bytes_despite_local_replacements(self):
+        self.commit_fixture()
+        self.git('tag', '-a', 'v-private', '-m', 'Contact: ' + self.private_name)
+        self.git('tag', '-a', 'v-public', '-m', 'Public release')
+        private = self.git('rev-parse', 'v-private').decode().strip()
+        public = self.git('rev-parse', 'v-public').decode().strip()
+        self.git('replace', private, public)
+        self.assert_private_tag_failure(self.run_audit('--history'), self.private_name)
+
 
 if __name__ == '__main__':
     unittest.main()
