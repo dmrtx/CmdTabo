@@ -3,6 +3,46 @@ import XCTest
 @testable import CmdTabo
 
 final class CaptureLifecycleTests: XCTestCase {
+    func testSecureInputReleasesOnceAndWaitsBeforeCapturingAgain() {
+        var lifecycle = CaptureLifecycle()
+        var releases = 0
+        lifecycle.onRelease = { releases += 1 }
+        XCTAssertTrue(lifecycle.permitsCapture(now: 100))
+        XCTAssertTrue(lifecycle.updateSecureInput(true, now: 100))
+        XCTAssertFalse(lifecycle.permitsCapture(now: 101))
+        XCTAssertFalse(lifecycle.updateSecureInput(true, now: 101))
+        XCTAssertEqual(releases, 1)
+        XCTAssertTrue(lifecycle.updateSecureInput(false, now: 102))
+        XCTAssertFalse(lifecycle.permitsCapture(now: 103.9))
+        XCTAssertFalse(lifecycle.updateSecureInput(false, now: 104))
+        XCTAssertTrue(lifecycle.permitsCapture(now: 104))
+    }
+    func testSecureInputEndingCannotBypassSleepSessionOrFailure() {
+        var lifecycle = CaptureLifecycle()
+        lifecycle.suspend(.systemSleep)
+        lifecycle.suspend(.inactiveSession)
+        lifecycle.updateSecureInput(true, now: 100)
+        lifecycle.fail()
+        lifecycle.updateSecureInput(false, now: 101)
+        XCTAssertFalse(lifecycle.permitsCapture(now: 200))
+        lifecycle.retry()
+        XCTAssertFalse(lifecycle.permitsCapture(now: 200))
+        lifecycle.resume(.systemSleep, now: 200)
+        XCTAssertFalse(lifecycle.permitsCapture(now: 210))
+        lifecycle.resume(.inactiveSession, now: 211)
+        XCTAssertTrue(lifecycle.permitsCapture(now: 213))
+    }
+    func testWakeAndRetryCannotBypassSecureInput() {
+        var lifecycle = CaptureLifecycle()
+        lifecycle.updateSecureInput(true, now: 100)
+        lifecycle.suspend(.displaySleep)
+        lifecycle.fail()
+        lifecycle.resume(.displaySleep, now: 101)
+        lifecycle.retry()
+        XCTAssertFalse(lifecycle.permitsCapture(now: 200))
+        lifecycle.updateSecureInput(false, now: 201)
+        XCTAssertTrue(lifecycle.permitsCapture(now: 203))
+    }
     func testWakeCannotCaptureWhileDisplayOrSessionIsStillAsleep() {
         var lifecycle = CaptureLifecycle()
         var releases = 0

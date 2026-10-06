@@ -40,6 +40,26 @@ final class KeyboardTests: XCTestCase {
 }
 
 final class KeyboardOwnershipTests: XCTestCase {
+    func testSecureInputRestoresNativeShortcutsEvenWhenTapReportsRunning() {
+        let keyboard = Capture(), native = Native()
+        var lifecycle = CaptureLifecycle()
+        lifecycle.onRelease = { native.restore(); keyboard.stop() }
+        KeyboardOwnership.reconcile(eligible: lifecycle.permitsCapture(now: 100), keyboard: keyboard, native: native)
+        XCTAssertTrue(keyboard.running)
+        XCTAssertTrue(native.overridden)
+        lifecycle.updateSecureInput(true, now: 101)
+        KeyboardOwnership.reconcile(eligible: lifecycle.permitsCapture(now: 101), keyboard: keyboard, native: native)
+        XCTAssertFalse(keyboard.running)
+        XCTAssertFalse(native.overridden)
+        XCTAssertEqual(keyboard.starts, 1)
+        lifecycle.updateSecureInput(false, now: 102)
+        KeyboardOwnership.reconcile(eligible: lifecycle.permitsCapture(now: 103), keyboard: keyboard, native: native)
+        XCTAssertFalse(native.overridden)
+        KeyboardOwnership.reconcile(eligible: lifecycle.permitsCapture(now: 104), keyboard: keyboard, native: native)
+        XCTAssertTrue(keyboard.running)
+        XCTAssertTrue(native.overridden)
+        XCTAssertEqual(keyboard.starts, 2)
+    }
     final class Capture: KeyboardCapture {
         var running = false
         var canStart = true
@@ -105,6 +125,36 @@ final class KeyboardRecoveryTests: XCTestCase {
         let done = expectation(description: "main queue drained")
         DispatchQueue.main.async { done.fulfill() }
         wait(for: [done], timeout: 2)
+    }
+    func testDiagnosticsDistinguishReceivedEventsFromHandledShortcuts() throws {
+        let keyboard = Keyboard()
+        keyboard.canBegin = { false }
+        XCTAssertFalse(keyboard.handle(type: .keyDown, event: try event()))
+        XCTAssertEqual(keyboard.eventCount, 1)
+        XCTAssertEqual(keyboard.shortcutCount, 0)
+        XCTAssertNotNil(keyboard.lastEventTime)
+        keyboard.canBegin = { true }
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event()))
+        XCTAssertEqual(keyboard.eventCount, 2)
+        XCTAssertEqual(keyboard.shortcutCount, 1)
+        keyboard.stop()
+        XCTAssertEqual(keyboard.eventCount, 2)
+        XCTAssertEqual(keyboard.shortcutCount, 1)
+    }
+    func testSecureInputDiscardsQueuedSelectionAndConfirmation() throws {
+        let keyboard = Keyboard()
+        var lifecycle = CaptureLifecycle()
+        var actions: [String] = []
+        keyboard.canBegin = { true }
+        keyboard.onTab = { _ in actions.append("tab") }
+        keyboard.onConfirm = { actions.append("confirm") }
+        lifecycle.onRelease = { keyboard.stop() }
+        XCTAssertTrue(keyboard.handle(type: .keyDown, event: try event(), deferred: true))
+        XCTAssertFalse(keyboard.handle(type: .flagsChanged, event: try event(55, flags: []), deferred: true))
+        lifecycle.updateSecureInput(true, now: 100)
+        drain()
+        XCTAssertEqual(actions, [])
+        XCTAssertFalse(lifecycle.permitsCapture(now: 101))
     }
     func testCallbackDefersWindowActionsAndKeepsRapidPressReleaseOrder() throws {
         let keyboard = Keyboard()

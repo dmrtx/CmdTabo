@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import SwitcherCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -94,7 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let now = ProcessInfo.processInfo.systemUptime
             if now - self.lastHealth >= 30 {
                 self.lastHealth = now
-                DiagnosticLog.shared.record("health capture=\(self.keyboard.running) owned=\(self.nativeCommandTab.isOverridden) catalogReady=\(self.catalog.ready) querying=\(self.catalog.queryInProgress) failed=\(self.lifecycle.failed)")
+                let eventAge = self.keyboard.lastEventTime.map { String(Int(max(0, now - $0))) } ?? "none"
+                DiagnosticLog.shared.record("health capture=\(self.keyboard.running) owned=\(self.nativeCommandTab.isOverridden) catalogReady=\(self.catalog.ready) querying=\(self.catalog.queryInProgress) failed=\(self.lifecycle.failed) secureInput=\(self.lifecycle.secureInputEnabled) events=\(self.keyboard.eventCount) shortcuts=\(self.keyboard.shortcutCount) lastEventAge=\(eventAge)")
             }
             if self.showing && !self.preview && !CGEventSource.flagsState(.combinedSessionState).contains(.maskCommand) { self.confirm() }
         }
@@ -194,6 +196,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.hide()
     }
     private func reconcilePermissions() {
+        let now = ProcessInfo.processInfo.systemUptime
+        if lifecycle.updateSecureInput(IsSecureEventInputEnabled(), now: now) {
+            DiagnosticLog.shared.record("secure input \(lifecycle.secureInputEnabled ? "enabled; native shortcuts restored" : "disabled; capture settling")")
+        }
         if !KeyboardOwnership.reconcile(eligible: !relaunching && enabled && accessibility.trusted && catalog.ready && lifecycle.permitsCapture(now: ProcessInfo.processInfo.systemUptime),
                                         keyboard: keyboard, native: nativeCommandTab) {
             captureFailed()
@@ -204,6 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let text: String
         if lifecycle.failed { text = "Capture stopped after a failure. ⌘Tab uses macOS. Choose Pause / resume to retry. Logs are available from the menu." }
         else if !enabled { text = "Paused. ⌘Tab uses the macOS switcher." }
+        else if lifecycle.secureInputEnabled { text = "Secure keyboard input is active. ⌘Tab uses macOS until it ends." }
         else if !lifecycle.permitsCapture(now: ProcessInfo.processInfo.systemUptime) { text = "Waiting for the session to resume. ⌘Tab uses macOS." }
         else if relaunching { text = "Access granted. Reopening CmdTabo to refresh the permission…" }
         else if !accessibility.trusted { text = "Enable CmdTabo in System Settings to use ⌘Tab. After an update, you may need to remove and add its permission again." }

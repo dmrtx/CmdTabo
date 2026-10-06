@@ -51,7 +51,7 @@ The window probe creates only its own disposable windows and checks real WindowS
 
 ```sh
 bash scripts/package-release.sh
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.4-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.5-macos-arm64.zip
 ```
 
 Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It generates a SHA-256 checksum file alongside the ZIP. Build output and diagnostic data are ignored by Git.
@@ -64,11 +64,12 @@ Release packaging remaps source paths, strips debug information, removes extende
 - An exclusive file lock prevents another instance from reading or changing the shortcuts while they are owned. A temporary child process inherits the lock and restores the original values if the main process crashes or is force-quit. The lock remains held until restoration finishes. While shortcuts are owned, the main run loop sends a heartbeat every 500 ms. If it stops responding for 15 awake seconds, the guardian terminates its own parent and restores the native shortcuts. Sleep time does not exhaust that deadline. The child exits on normal restoration and is not installed as a service. A temporary permission probe checks only whether the same executable is trusted; it is bounded by a six-second launcher timeout; the trust helper itself exits within four seconds. Failed keyboard recovery also restores the native shortcuts and requires an explicit resume from the menu. A disabled event tap is never automatically re-enabled.
 - Keyboard callbacks only decide which events to consume; window operations and app activation run after the callback returns. Pending actions are discarded when capture stops.
 - System sleep, display sleep and inactive sessions release shortcut ownership and stop polling windows. Capture resumes after all suspension reasons clear, a fresh window query completes and a two-second settling interval passes. A window query stalled for three seconds pauses capture.
+- Secure Input releases native shortcut ownership even if the event tap still reports enabled. Settings show that macOS handles ⌘Tab while secure input is active. Capture resumes after secure input ends and the two-second settling interval passes, provided the app is enabled and no failure or session suspension remains.
 - SkyLight is loaded dynamically to query window tags in a batch. Bit 60 indicates minimization; user-window markers and visible-window history distinguish user windows from invisible helpers. Hidden apps' normal-window markers also count at startup, before any visible-window history exists. Closed-window markers remain excluded; unknown states keep apps available.
 - CoreGraphics supplies window bounds and display geometry. Being on another Space does not by itself mean a window is minimized.
 - Window metadata refreshes approximately every 400 ms in the background. Ordering starts from window order and then follows app activations during the session.
 
-Health logs live in `~/Library/Logs/CmdTabo/`, accessible through **Open diagnostic logs**. They include version/build/source state, sleep/wake transitions, capture failures, slow queries and a health summary every 30 seconds. The app and guardian each keep two rotating logs of approximately 1 MiB each, with owner-only permissions. They contain no key values, app names, window titles or screenshots and are never uploaded.
+Health logs live in `~/Library/Logs/CmdTabo/`, accessible through **Open diagnostic logs**. They include version/build/source state, sleep/wake and Secure Input transitions, capture failures, slow queries and a health summary every 30 seconds. Summaries include aggregate counts of received keyboard events and handled switcher shortcuts, plus the elapsed seconds since the last received event. The app and guardian each keep two rotating logs of approximately 1 MiB each, with owner-only permissions. They contain no key values, app names, window titles or screenshots and are never uploaded.
 
 Private APIs can change between macOS releases. Missing tags or unknown positions keep apps available. Only normal-layer windows of regular apps are considered; apps using floating main windows may need adaptation. Secure Input or other keyboard utilities can affect shortcut capture. Activation follows macOS app activation behavior.
 

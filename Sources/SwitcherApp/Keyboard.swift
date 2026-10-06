@@ -11,6 +11,9 @@ final class Keyboard: KeyboardCapture {
     private var deliveringAction = false
     private var failed = false
     private var failurePending = false
+    private(set) var eventCount = 0
+    private(set) var shortcutCount = 0
+    private(set) var lastEventTime: TimeInterval?
     var isShowing: () -> Bool = { false }
     var canBegin: () -> Bool = { false }
     var onTab: (Bool) -> Void = { _ in }
@@ -107,6 +110,10 @@ final class Keyboard: KeyboardCapture {
             return false
         }
         guard !failed else { return false }
+        if type == .keyDown || type == .keyUp || type == .flagsChanged {
+            eventCount += 1
+            lastEventTime = ProcessInfo.processInfo.systemUptime
+        }
         let sessionShowing = queuedSession ?? (pendingSession || isShowing())
         if type == .flagsChanged {
             if sessionShowing && (pendingSession || shouldConfirmOnCommandRelease()) && !event.flags.contains(.maskCommand) {
@@ -121,6 +128,7 @@ final class Keyboard: KeyboardCapture {
         let command = event.flags.contains(.maskCommand)
         if key == 48 && command && !event.flags.contains(.maskControl) && !event.flags.contains(.maskAlternate),
            sessionShowing || canBegin() {
+            shortcutCount += 1
             swallowed.insert(key)
             pendingSession = true
             let backwards = event.flags.contains(.maskShift)
