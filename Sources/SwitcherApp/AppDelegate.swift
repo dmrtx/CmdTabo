@@ -18,10 +18,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: NSWindow!
     private let status = NSTextField(wrappingLabelWithString: "Preparing…")
     private let displaysLabel = NSTextField(wrappingLabelWithString: "")
+    private let permissionLabel = NSTextField(labelWithString: "Checking Accessibility…")
+    private let permissionIcon = NSImageView()
     private var enabledButton: NSButton!
     private var scopeButton: NSButton!
     private var minimizedButton: NSButton!
     private var hiddenButton: NSButton!
+    private var accessibilityButton: NSButton!
     private var heartbeat: Timer?
     private var lifecycle = CaptureLifecycle()
     private var lifecycleObservers: [NSObjectProtocol] = []
@@ -201,13 +204,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else if !enabled { text = "Paused. ⌘Tab uses the macOS switcher." }
         else if !lifecycle.permitsCapture(now: ProcessInfo.processInfo.systemUptime) { text = "Waiting for the session to resume. ⌘Tab uses macOS." }
         else if relaunching { text = "Access granted. Reopening CmdTabo to refresh the permission…" }
-        else if !accessibility.trusted { text = "Accessibility is required. Click “Grant Accessibility” and enable CmdTabo in System Settings. Access is checked automatically; an existing grant may need removing and re-adding after an update." }
+        else if !accessibility.trusted { text = "Enable CmdTabo in System Settings to use ⌘Tab. After an update, you may need to remove and add its permission again." }
         else if !catalog.ready { text = "Loading windows…" }
         else if !keyboard.running { text = "Accessibility granted, but ⌘Tab could not be captured. Try quitting and reopening CmdTabo." }
-        else { text = "Active. Hold ⌘ and press Tab; release ⌘ to switch apps." }
+        else { text = "Active. Release ⌘ to switch to the selected app." }
         status.stringValue = text
+        let accessGranted = accessibility.trusted || relaunching
+        permissionLabel.stringValue = accessGranted ? "Accessibility granted" : "Accessibility required"
+        permissionIcon.image = NSImage(systemSymbolName: accessGranted ? "checkmark.circle.fill" : "exclamationmark.circle.fill",
+                                       accessibilityDescription: permissionLabel.stringValue)
+        permissionIcon.contentTintColor = accessGranted ? .systemGreen : .systemOrange
+        accessibilityButton.isHidden = accessGranted
+        accessibilityButton.isEnabled = !accessGranted
         let screens = NSScreen.screens
-        displaysLabel.stringValue = "\(screens.count) display\(screens.count == 1 ? "" : "s") detected: " + screens.map(\.localizedName).joined(separator: ", ")
+        displaysLabel.stringValue = "\(screens.count) display\(screens.count == 1 ? "" : "s") · " + screens.map(\.localizedName).joined(separator: ", ")
         enabledButton.state = enabled ? .on : .off
         scopeButton.state = onlyThisDisplay ? .on : .off
         minimizedButton.state = filterOptions.excludeMinimized ? .on : .off
@@ -230,50 +240,154 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
     }
     private func createSettings() {
-        settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 485),
+        settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 550),
                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         settings.title = "CmdTabo"
         settings.isReleasedWhenClosed = false
-        settings.center()
-        let title = NSTextField(labelWithString: "CmdTabo")
-        title.font = .systemFont(ofSize: 22, weight: .semibold)
-        let description = NSTextField(wrappingLabelWithString: "One entry per app, just like ⌘Tab. Hold ⌘, press Tab, then release ⌘ to switch. ⌘⇧Tab goes back; Esc cancels.")
-        description.textColor = .secondaryLabelColor
+        func label(_ text: String, size: CGFloat = 12, weight: NSFont.Weight = .regular,
+                   color: NSColor = .secondaryLabelColor) -> NSTextField {
+            let field = NSTextField(wrappingLabelWithString: text)
+            field.font = .systemFont(ofSize: size, weight: weight)
+            field.textColor = color
+            return field
+        }
+        func column(_ views: [NSView], spacing: CGFloat) -> NSStackView {
+            let stack = NSStackView(views: views)
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = spacing
+            for view in views { view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+            return stack
+        }
+        func divider() -> NSBox {
+            let line = NSBox()
+            line.boxType = .separator
+            return line
+        }
+        func card(_ body: NSView) -> NSBox {
+            let box = NSBox()
+            box.boxType = .custom
+            box.titlePosition = .noTitle
+            box.cornerRadius = 12
+            box.fillColor = .controlBackgroundColor
+            box.borderColor = .separatorColor
+            box.borderWidth = 0.5
+            body.translatesAutoresizingMaskIntoConstraints = false
+            box.addSubview(body)
+            NSLayoutConstraint.activate([
+                body.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 16),
+                body.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -16),
+                body.topAnchor.constraint(equalTo: box.topAnchor, constant: 16),
+                body.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -16)
+            ])
+            return box
+        }
+        func filterRow(_ button: NSButton, hint: String) -> NSView {
+            let detail = label(hint, size: 11)
+            let row = NSView()
+            button.translatesAutoresizingMaskIntoConstraints = false
+            detail.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(button)
+            row.addSubview(detail)
+            NSLayoutConstraint.activate([
+                button.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+                button.topAnchor.constraint(equalTo: row.topAnchor),
+                button.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor),
+                detail.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 22),
+                detail.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+                detail.topAnchor.constraint(equalTo: button.bottomAnchor, constant: 3),
+                detail.bottomAnchor.constraint(equalTo: row.bottomAnchor)
+            ])
+            return row
+        }
+
+        let mark = NSImageView()
+        mark.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: nil)
+        mark.setAccessibilityElement(false)
+        mark.contentTintColor = .controlAccentColor
+        mark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 30, weight: .medium)
+        mark.widthAnchor.constraint(equalToConstant: 42).isActive = true
+        mark.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        let heading = column([label("CmdTabo", size: 25, weight: .semibold, color: .labelColor),
+                              label("Your apps, without the clutter.", size: 13)], spacing: 3)
+        let header = NSStackView(views: [mark, heading])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 14
+
+        let shortcuts = NSStackView()
+        shortcuts.orientation = .horizontal
+        shortcuts.spacing = 18
+        for (key, action) in [("⌘Tab", "Next"), ("⌘⇧Tab", "Previous"), ("Esc", "Cancel")] {
+            let keyLabel = label(key, size: 12, weight: .medium, color: .labelColor)
+            let item = NSStackView(views: [keyLabel, label(action, size: 11)])
+            item.spacing = 5
+            shortcuts.addArrangedSubview(item)
+        }
+        let shortcutLine = NSView()
+        shortcuts.translatesAutoresizingMaskIntoConstraints = false
+        shortcutLine.addSubview(shortcuts)
+        NSLayoutConstraint.activate([
+            shortcuts.leadingAnchor.constraint(equalTo: shortcutLine.leadingAnchor),
+            shortcuts.trailingAnchor.constraint(lessThanOrEqualTo: shortcutLine.trailingAnchor),
+            shortcuts.topAnchor.constraint(equalTo: shortcutLine.topAnchor),
+            shortcuts.bottomAnchor.constraint(equalTo: shortcutLine.bottomAnchor)
+        ])
+
         enabledButton = NSButton(checkboxWithTitle: "Use CmdTabo for ⌘Tab", target: self, action: #selector(toggleEnabled))
-        let filtersTitle = NSTextField(labelWithString: "Exclude from the switcher")
-        filtersTitle.font = .systemFont(ofSize: 13, weight: .semibold)
-        minimizedButton = NSButton(checkboxWithTitle: "Apps with all windows minimized", target: self, action: #selector(toggleMinimized))
-        hiddenButton = NSButton(checkboxWithTitle: "Hidden apps (⌘H)", target: self, action: #selector(toggleHidden))
-        scopeButton = NSButton(checkboxWithTitle: "Apps with windows only on other displays", target: self, action: #selector(toggleScope))
-        let scopeHint = NSTextField(wrappingLabelWithString: "Each filter can be disabled independently. Apps return when restored or unhidden. The display filter uses the screen under the pointer when you press ⌘Tab.")
-        scopeHint.font = .systemFont(ofSize: 11)
-        scopeHint.textColor = .secondaryLabelColor
+        enabledButton.font = .systemFont(ofSize: 13, weight: .medium)
+        minimizedButton = NSButton(checkboxWithTitle: "Minimized apps", target: self, action: #selector(toggleMinimized))
+        hiddenButton = NSButton(checkboxWithTitle: "Hidden apps", target: self, action: #selector(toggleHidden))
+        scopeButton = NSButton(checkboxWithTitle: "Apps only on other displays", target: self, action: #selector(toggleScope))
+        let filters = column([
+            filterRow(minimizedButton, hint: "Exclude apps when all their windows are minimized."),
+            filterRow(hiddenButton, hint: "Exclude apps hidden with ⌘H."),
+            filterRow(scopeButton, hint: "Use the display under your pointer when switching.")
+        ], spacing: 14)
+        let switcher = card(column([
+            enabledButton, divider(),
+            label("EXCLUDE FROM THE SWITCHER", size: 10, weight: .semibold), filters
+        ], spacing: 14))
+
         displaysLabel.font = .systemFont(ofSize: 11)
         displaysLabel.textColor = .secondaryLabelColor
         status.font = .systemFont(ofSize: 12)
-        let access = NSButton(title: "Grant Accessibility", target: self, action: #selector(requestAccessibility))
-        access.bezelStyle = .rounded
-        let previewButton = NSButton(title: "Preview", target: self, action: #selector(showPreview))
+        status.textColor = .secondaryLabelColor
+        permissionLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        permissionIcon.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        permissionIcon.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        permissionIcon.setAccessibilityElement(false)
+        let permission = NSStackView(views: [permissionIcon, permissionLabel])
+        permission.spacing = 7
+        let connection = card(column([permission, status, displaysLabel], spacing: 8))
+
+        accessibilityButton = NSButton(title: "Grant Accessibility", target: self, action: #selector(requestAccessibility))
+        accessibilityButton.bezelStyle = .rounded
+        let previewButton = NSButton(title: "Preview switcher", target: self, action: #selector(showPreview))
         previewButton.bezelStyle = .rounded
-        let buttons = NSStackView(views: [access, previewButton])
+        previewButton.image = NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: nil)
+        previewButton.imagePosition = .imageLeading
+        previewButton.setAccessibilityLabel("Preview switcher")
+        let buttons = NSStackView(views: [accessibilityButton, previewButton])
         buttons.orientation = .horizontal
-        buttons.spacing = 10
-        let footnote = NSTextField(labelWithString: "Accessibility only · No screen capture · Keeps the Dock")
-        footnote.font = .systemFont(ofSize: 10)
-        footnote.textColor = .tertiaryLabelColor
-        let stack = NSStackView(views: [title, description, enabledButton, filtersTitle, minimizedButton, hiddenButton,
-                                      scopeButton, scopeHint, displaysLabel, status, buttons, footnote])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 12
+        buttons.spacing = 8
+        let privacy = label("Local only · No screen capture", size: 10)
+        let footer = NSStackView(views: [privacy, NSView(), buttons])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        privacy.setContentHuggingPriority(.required, for: .horizontal)
+        buttons.setContentHuggingPriority(.required, for: .horizontal)
+
+        let stack = column([header, shortcutLine, switcher, connection, footer], spacing: 18)
         stack.translatesAutoresizingMaskIntoConstraints = false
         settings.contentView?.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: settings.contentView!.leadingAnchor, constant: 26),
             stack.trailingAnchor.constraint(equalTo: settings.contentView!.trailingAnchor, constant: -26),
-            stack.topAnchor.constraint(equalTo: settings.contentView!.topAnchor, constant: 24)
+            stack.topAnchor.constraint(equalTo: settings.contentView!.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: settings.contentView!.bottomAnchor, constant: -24)
         ])
-        for label in [description, scopeHint, displaysLabel, status] { label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        settings.center()
     }
     @objc private func requestAccessibility() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary

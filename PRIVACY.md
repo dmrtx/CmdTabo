@@ -16,7 +16,7 @@ Before publication, the staged snapshot and reachable Git history are scanned fo
 
 ```sh
 python3 scripts/audit-publication.py --history
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.2-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.3-macos-arm64.zip
 ```
 
 A clean scan records what was checked and that no matching data was found; it is not a guarantee against every possible secret format. Review the exact staged files and release contents when publishing changes. Local audit reports are not published.
