@@ -4,7 +4,7 @@
 
 CmdTabo reads running-app visibility and WindowServer metadata locally to filter its switcher. Accessibility is used to intercept the switcher shortcut. A temporary child process checks only Accessibility trust when the main process reports it missing. It does not prompt, change permissions or read application data. It contains no network client, analytics, update service, screen capture, window-title collection, or keystroke recorder.
 
-The opt-in `--diagnose` command prints local app/display/window metadata. Local rotating health logs in `~/Library/Logs/CmdTabo/` include process IDs, version/build/source state, OS version, sleep/wake transitions, capture failures, query timings and periodic health summaries. They do not include key values, app names, window titles or screenshots. App and guardian logs each retain approximately 2 MiB with owner-only file permissions. The menu can open their directory. Those outputs remain local and are excluded from Git and release bundles.
+The opt-in `--diagnose` command prints local app/display/window metadata. Local rotating health logs in `~/Library/Logs/CmdTabo/` include process IDs, version/build/source state, OS version, sleep/wake and Secure Input transitions, capture failures, query timings and periodic health summaries. Keyboard diagnostics contain only aggregate event/shortcut counts and seconds since the last received event. They do not include key values, app names, window titles or screenshots. App and guardian logs each retain approximately 2 MiB with owner-only file permissions. The menu can open their directory. Those outputs remain local and are excluded from Git and release bundles.
 
 ## Publication boundary
 
@@ -16,7 +16,7 @@ Before publication, the staged snapshot and reachable Git history are scanned fo
 
 ```sh
 python3 scripts/audit-publication.py --history
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.3-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.5-macos-arm64.zip
 ```
 
 A clean scan records what was checked and that no matching data was found; it is not a guarantee against every possible secret format. Review the exact staged files and release contents when publishing changes. Local audit reports are not published.
