@@ -32,12 +32,17 @@ final class FilteringTests: XCTestCase {
     func testAllFilterCombinationsAreIndependent() {
         for excludeMinimized in [false, true] {
             for excludeHidden in [false, true] {
-                let options = FilterOptions(excludeMinimized: excludeMinimized, excludeHidden: excludeHidden)
-                let minimized = [window(tags: 0x1300000100480001)]
-                XCTAssertEqual(WindowFilter.exclusion(windows: minimized, displays: screens, target: nil, options: options),
-                               excludeMinimized ? .minimized : nil)
-                XCTAssertEqual(WindowFilter.exclusion(windows: [window()], displays: screens, target: nil,
-                                                      isHidden: true, options: options), excludeHidden ? .hidden : nil)
+                for excludeWindowless in [false, true] {
+                    let options = FilterOptions(excludeMinimized: excludeMinimized, excludeHidden: excludeHidden,
+                                                excludeWindowless: excludeWindowless)
+                    let minimized = [window(tags: 0x1300000100480001)]
+                    XCTAssertEqual(WindowFilter.exclusion(windows: minimized, displays: screens, target: nil, options: options),
+                                   excludeMinimized ? .minimized : nil)
+                    XCTAssertEqual(WindowFilter.exclusion(windows: [window()], displays: screens, target: nil,
+                                                          isHidden: true, options: options), excludeHidden ? .hidden : nil)
+                    XCTAssertEqual(WindowFilter.exclusion(windows: [], displays: screens, target: nil, options: options),
+                                   excludeWindowless ? .windowless : nil)
+                }
             }
         }
     }
@@ -61,11 +66,41 @@ final class FilteringTests: XCTestCase {
     func testInvisibleHelperDoesNotKeepMinimizedApp() {
         XCTAssertEqual(WindowFilter.exclusion(windows: [window(tags: 0x1300000100480001), window(2, tags: 0x0000000100080001)], displays: screens, target: nil), .minimized)
     }
-    func testWindowlessAppRemainsAvailable() {
-        XCTAssertNil(WindowFilter.exclusion(windows: [], displays: screens, target: 1))
+    func testWindowlessAppIsExcludedByDefault() {
+        XCTAssertEqual(WindowFilter.exclusion(windows: [], displays: screens, target: 1), .windowless)
+    }
+    func testWindowlessFilterCanBeDisabledIndependently() {
+        let options = FilterOptions(excludeWindowless: false)
+        XCTAssertNil(WindowFilter.exclusion(windows: [], displays: screens, target: 1, options: options))
+        XCTAssertEqual(WindowFilter.exclusion(windows: [window(tags: 0x1300000100480001)], displays: screens,
+                                              target: nil, options: options), .minimized)
+        XCTAssertEqual(WindowFilter.exclusion(windows: [window()], displays: screens, target: nil,
+                                              isHidden: true, options: options), .hidden)
+    }
+    func testOnlyClosedWindowsOrInvisibleHelpersCountAsWindowless() {
+        for tags: UInt64 in [0x0000000100480001, 0x0000000100080001] {
+            var closed = window(tags: tags)
+            closed.knownUserWindow = true
+            XCTAssertEqual(WindowFilter.exclusion(windows: [closed], displays: screens, target: nil), .windowless)
+            XCTAssertNil(WindowFilter.exclusion(windows: [closed], displays: screens, target: nil,
+                                                options: FilterOptions(excludeWindowless: false)))
+        }
+    }
+    func testOpeningAndClosingWindowUpdatesEligibility() {
+        XCTAssertEqual(WindowFilter.exclusion(windows: [], displays: screens, target: nil), .windowless)
+        XCTAssertNil(WindowFilter.exclusion(windows: [window(onScreen: true)], displays: screens, target: nil))
+        XCTAssertEqual(WindowFilter.exclusion(windows: [window(tags: 0x0000000100480001)],
+                                              displays: screens, target: nil), .windowless)
+    }
+    func testDisablingMinimizedAndHiddenFiltersDoesNotDisableWindowlessFilter() {
+        let options = FilterOptions(excludeMinimized: false, excludeHidden: false)
+        XCTAssertEqual(WindowFilter.exclusion(windows: [], displays: screens, target: nil,
+                                              isHidden: true, options: options), .windowless)
     }
     func testUnknownTagsFailOpen() {
         XCTAssertNil(WindowFilter.exclusion(windows: [window(tags: nil)], displays: screens, target: nil))
+        XCTAssertNil(WindowFilter.exclusion(windows: [window(tags: 0x0000000100080001), window(2, tags: nil)],
+                                            displays: screens, target: nil))
     }
     func testMinimizedWindowWithDifferentUserMarkerStillCounts() {
         XCTAssertEqual(WindowFilter.exclusion(windows: [window(tags: 0x1000000100480001)], displays: screens, target: nil), .minimized)

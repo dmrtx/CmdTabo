@@ -2,13 +2,14 @@
 
 A small macOS app switcher with the familiar ⌘Tab interaction: one icon per app, a translucent single-row panel, and the selected app's name underneath. It keeps applications in the Dock.
 
-Three independent filters are enabled by default:
+Four independent filters are enabled by default:
 
 - **Apps with all windows minimized** disappear until a window is restored.
 - **Hidden apps (⌘H)** disappear until the app is unhidden. Hiding and minimizing are handled separately.
+- **Apps without windows** disappear while running in the background and return when a window opens. Closed windows and invisible helpers do not count as usable windows.
 - **Apps with windows only on other displays** are excluded from the display under the pointer when switching starts.
 
-An app with eligible windows on both displays appears on both. Windows spanning displays belong to the display containing the largest portion of the window. With the minimized-app filter disabled, minimized windows also count toward display membership. Windowless apps and unknown window states remain available unless the hidden-app filter excludes them.
+An app with eligible windows on both displays appears on both. Windows spanning displays belong to the display containing the largest portion of the window. With the minimized-app filter disabled, minimized windows also count toward display membership. Disable the windowless-app filter to keep background apps available. Unknown window states remain available unless another filter excludes them; windows on other Spaces are not considered closed or minimized merely because they are off screen.
 
 ## Download and use
 
@@ -22,7 +23,7 @@ The release is experimental, ad hoc signed, and not notarized. macOS may require
 
 The menu bar icon opens **CmdTabo Settings…**, **Preview switcher**, **Pause / resume**, **Open diagnostic logs**, and **Quit CmdTabo**. Settings group the independent filters with short explanations, show the keyboard shortcuts, and clearly indicate whether Accessibility is granted. The permission button appears only when access is needed. Preview works with the mouse before granting Accessibility. Unchecking **Use CmdTabo for ⌘Tab**, pausing, or quitting restores the original macOS shortcuts.
 
-All three filter settings are saved independently. Permission changes are checked automatically without prompting. If a fresh process confirms the grant while the running process still reports it missing, CmdTabo reopens itself once; it never restarts in a loop. Rebuilding or replacing an ad hoc signed app may still require removing and re-adding it in Accessibility. The app cannot grant itself access.
+All four filter settings are saved independently. Permission changes are checked automatically without prompting. If a fresh process confirms the grant while the running process still reports it missing, CmdTabo reopens itself once; it never restarts in a loop. Rebuilding or replacing an ad hoc signed app may still require removing and re-adding it in Accessibility. The app cannot grant itself access.
 
 ## Permissions and privacy
 
@@ -50,7 +51,7 @@ The window probe creates only its own disposable windows and checks real WindowS
 
 ```sh
 bash scripts/package-release.sh
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.3-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.4-macos-arm64.zip
 ```
 
 Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It generates a SHA-256 checksum file alongside the ZIP. Build output and diagnostic data are ignored by Git.
