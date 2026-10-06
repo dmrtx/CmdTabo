@@ -37,13 +37,15 @@ public struct WindowState {
 public struct FilterOptions: Equatable {
     public var excludeMinimized: Bool
     public var excludeHidden: Bool
-    public init(excludeMinimized: Bool = true, excludeHidden: Bool = true) {
+    public var excludeWindowless: Bool
+    public init(excludeMinimized: Bool = true, excludeHidden: Bool = true, excludeWindowless: Bool = true) {
         self.excludeMinimized = excludeMinimized
         self.excludeHidden = excludeHidden
+        self.excludeWindowless = excludeWindowless
     }
 }
 
-public enum Exclusion: String { case hidden, minimized, otherDisplay }
+public enum Exclusion: String { case hidden, minimized, windowless, otherDisplay }
 
 public enum WindowFilter {
     public static func displayID(for rect: CGRect, displays: [Display]) -> UInt32? {
@@ -60,7 +62,7 @@ public enum WindowFilter {
                                  isHidden: Bool = false, options: FilterOptions = FilterOptions()) -> Exclusion? {
         if options.excludeHidden && isHidden { return .hidden }
         let real = windows.filter { $0.isUserWindow(appIsHidden: isHidden) }
-        guard !real.isEmpty else { return nil }
+        guard !real.isEmpty else { return options.excludeWindowless ? .windowless : nil }
         let available = options.excludeMinimized ? real.filter { !$0.minimized } : real
         guard !available.isEmpty else { return .minimized }
         if let target {

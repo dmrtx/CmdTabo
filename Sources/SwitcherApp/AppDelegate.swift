@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var scopeButton: NSButton!
     private var minimizedButton: NSButton!
     private var hiddenButton: NSButton!
+    private var windowlessButton: NSButton!
     private var accessibilityButton: NSButton!
     private var heartbeat: Timer?
     private var lifecycle = CaptureLifecycle()
@@ -41,13 +42,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var filterOptions: FilterOptions {
         FilterOptions(excludeMinimized: UserDefaults.standard.bool(forKey: "excludeMinimized"),
-                      excludeHidden: UserDefaults.standard.bool(forKey: "excludeHidden"))
+                      excludeHidden: UserDefaults.standard.bool(forKey: "excludeHidden"),
+                      excludeWindowless: UserDefaults.standard.bool(forKey: "excludeWindowless"))
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) { configureLifecycle() }
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: ["switcherEnabled": true, "onlyThisDisplay": true,
-                                                "excludeMinimized": true, "excludeHidden": true])
+                                                "excludeMinimized": true, "excludeHidden": true, "excludeWindowless": true])
         NSApp.setActivationPolicy(.accessory)
         let mainMenu = NSMenu()
         let appMenu = NSMenu()
@@ -222,6 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scopeButton.state = onlyThisDisplay ? .on : .off
         minimizedButton.state = filterOptions.excludeMinimized ? .on : .off
         hiddenButton.state = filterOptions.excludeHidden ? .on : .off
+        windowlessButton.state = filterOptions.excludeWindowless ? .on : .off
         statusItem.button?.toolTip = "CmdTabo · " + (keyboard.running ? "Active" : "Pending / paused")
     }
     private func createStatusItem() {
@@ -240,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
     }
     private func createSettings() {
-        settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 550),
+        settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 600),
                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         settings.title = "CmdTabo"
         settings.isReleasedWhenClosed = false
@@ -338,10 +341,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         enabledButton.font = .systemFont(ofSize: 13, weight: .medium)
         minimizedButton = NSButton(checkboxWithTitle: "Minimized apps", target: self, action: #selector(toggleMinimized))
         hiddenButton = NSButton(checkboxWithTitle: "Hidden apps", target: self, action: #selector(toggleHidden))
+        windowlessButton = NSButton(checkboxWithTitle: "Apps without windows", target: self, action: #selector(toggleWindowless))
         scopeButton = NSButton(checkboxWithTitle: "Apps only on other displays", target: self, action: #selector(toggleScope))
         let filters = column([
             filterRow(minimizedButton, hint: "Exclude apps when all their windows are minimized."),
             filterRow(hiddenButton, hint: "Exclude apps hidden with ⌘H."),
+            filterRow(windowlessButton, hint: "Exclude background apps until a window opens."),
             filterRow(scopeButton, hint: "Use the display under your pointer when switching.")
         ], spacing: 14)
         let switcher = card(column([
@@ -437,6 +442,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cancel(); updateStatus()
     }
     @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func toggleWindowless() {
+        UserDefaults.standard.set(!filterOptions.excludeWindowless, forKey: "excludeWindowless")
+        cancel(); updateStatus()
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showSettings(); return true }
     func applicationWillTerminate(_ notification: Notification) {
         nativeCommandTab.restore(); keyboard.stop(); heartbeat?.invalidate(); catalog.suspend()

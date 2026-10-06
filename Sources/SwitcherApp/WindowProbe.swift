@@ -49,7 +49,11 @@ final class WindowProbe: NSObject, NSApplicationDelegate {
                 WindowFilter.exclusion(windows: own, displays: connectedDisplays(), target: nil, isHidden: NSRunningApplication.current.isHidden,
                                        options: FilterOptions(excludeHidden: false)) == nil
         case 7: name = "unhidden"; valid = !NSRunningApplication.current.isHidden && first?.onScreen == true && reason == nil
-        case 8: name = "no windows"; valid = own.filter(\.isUserWindow).isEmpty && reason == nil
+        case 8:
+            name = "no windows"
+            valid = own.filter(\.isUserWindow).isEmpty && reason == .windowless &&
+                WindowFilter.exclusion(windows: own, displays: connectedDisplays(), target: nil,
+                                       options: FilterOptions(excludeWindowless: false)) == nil
         case 9:
             name = "cold-start hidden with one minimized"
             let fresh = (WindowServer().snapshot() ?? []).filter { $0.pid == ProcessInfo.processInfo.processIdentifier }
