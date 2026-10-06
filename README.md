@@ -20,7 +20,7 @@ The release is experimental, ad hoc signed, and not notarized. macOS may require
 2. Hold ⌘ and press Tab to move forward; ⌘⇧Tab moves backward.
 3. Release ⌘ to activate the selected app. Esc cancels; clicking an icon also switches apps.
 
-The menu bar icon opens **CmdTabo Settings…**, **Preview switcher**, **Pause / resume**, **Open diagnostic logs**, and **Quit CmdTabo**. Preview works with the mouse before granting Accessibility. Unchecking **Use CmdTabo for ⌘Tab**, pausing, or quitting restores the original macOS shortcuts.
+The menu bar icon opens **CmdTabo Settings…**, **Preview switcher**, **Pause / resume**, **Open diagnostic logs**, and **Quit CmdTabo**. Settings group the independent filters with short explanations, show the keyboard shortcuts, and clearly indicate whether Accessibility is granted. The permission button appears only when access is needed. Preview works with the mouse before granting Accessibility. Unchecking **Use CmdTabo for ⌘Tab**, pausing, or quitting restores the original macOS shortcuts.
 
 All three filter settings are saved independently. Permission changes are checked automatically without prompting. If a fresh process confirms the grant while the running process still reports it missing, CmdTabo reopens itself once; it never restarts in a loop. Rebuilding or replacing an ad hoc signed app may still require removing and re-adding it in Accessibility. The app cannot grant itself access.
 
@@ -50,7 +50,7 @@ The window probe creates only its own disposable windows and checks real WindowS
 
 ```sh
 bash scripts/package-release.sh
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.2-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.3-macos-arm64.zip
 ```
 
 Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It generates a SHA-256 checksum file alongside the ZIP. Build output and diagnostic data are ignored by Git.
