@@ -82,6 +82,24 @@ def public_identity(name, email):
     return bool(match and name.casefold() == match.group(1).casefold())
 
 
+def object_headers(data):
+    """Unfold Git's space-prefixed continuations without discarding any bytes."""
+    raw_headers, _, message = data.partition(b'\n\n')
+    headers = []
+    for line in raw_headers.split(b'\n'):
+        if line.startswith(b' ') and headers:
+            headers[-1] += b'\n' + line[1:]
+        else:
+            headers.append(line)
+    return headers, message
+
+
+def public_identity_header(header, role):
+    identity = re.fullmatch(role + r' (.+) <([^<>]+)> (-?\d+) ([+-]\d{4})',
+                            header.decode('utf-8', errors='replace'))
+    return bool(identity and public_identity(*identity.groups()[:2]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--history', action='store_true', help='Also inspect reachable Git history and annotated tags.')
@@ -108,6 +126,24 @@ def main():
             issues.append((label, 'binary file in source Git history'))
         for reason in findings(data, hints):
             issues.append((label, reason))
+
+    def inspect_tag(label, data):
+        headers, message = object_headers(data)
+        taggers = []
+        targets = []
+        for header in headers:
+            name, _, value = header.partition(b' ')
+            if name == b'tagger':
+                taggers.append(header)
+            else:
+                inspect(label, header)
+                if name == b'object' and re.fullmatch(rb'[0-9a-f]{40}|[0-9a-f]{64}', value):
+                    targets.append(value)
+        if len(taggers) != 1 or not all(public_identity_header(header, 'tagger') for header in taggers):
+            issues.append((label, 'non-public or malformed tagger identity'))
+        # A validated noreply identity is metadata, not arbitrary file content.
+        inspect(label, message)
+        return targets
 
     for entry in git('ls-files', '--stage', '-z').split(b'\0'):
         if not entry:
@@ -173,33 +209,33 @@ def main():
                 inspect_tree(object_id)
             elif kind == b'tag':
                 label = 'tag:' + object_id.decode()[:12]
-                headers, _, message = git('cat-file', 'tag', object_id).partition(b'\n\n')
-                taggers = []
-                for header in headers.splitlines():
-                    if header.startswith(b'tagger '):
-                        taggers.append(header)
-                    else:
-                        inspect(label, header)
-                        if header.startswith(b'object '):
-                            target = header[7:]
-                            if re.fullmatch(rb'[0-9a-f]{40}|[0-9a-f]{64}', target):
-                                objects.append(target)
-                valid_tagger = len(taggers) == 1
-                for tagger in taggers:
-                    identity = re.fullmatch(r'tagger (.+) <([^<>]+)> (-?\d+) ([+-]\d{4})',
-                                            tagger.decode('utf-8', errors='replace'))
-                    valid_tagger = valid_tagger and bool(identity and public_identity(*identity.groups()[:2]))
-                if not valid_tagger:
-                    issues.append((label, 'non-public or malformed tagger identity'))
-                # Allowed noreply metadata is checked above, not as content.
-                inspect(label, message)
+                objects.extend(inspect_tag(label, git('cat-file', 'tag', object_id)))
         # Public handles with GitHub noreply addresses are the only identities
         # permitted in author/committer metadata. Never print rejected values.
         for commit in git('rev-list', '--all').decode().splitlines():
-            inspect('commit:' + commit[:12], git('show', '-s', '--format=%B', commit))
-            identity = git('show', '-s', '--format=%an%x00%ae%x00%cn%x00%ce', commit).decode().rstrip('\n').split('\0')
-            if len(identity) != 4 or not (public_identity(*identity[:2]) and public_identity(*identity[2:])):
-                issues.append(('commit:' + commit[:12], 'non-public author or committer identity'))
+            label = 'commit:' + commit[:12]
+            headers, message = object_headers(git('cat-file', 'commit', commit))
+            identities = {b'author': [], b'committer': []}
+            for header in headers:
+                name, _, value = header.partition(b' ')
+                if name in identities:
+                    identities[name].append(header)
+                elif name == b'mergetag':
+                    # A mergetag embeds annotated tag bytes without publishing
+                    # a separate tag object/ref. Apply the same identity policy.
+                    inspect_tag(label + ':mergetag', value)
+                else:
+                    inspect(label, header)
+            if any(len(values) != 1 or not all(public_identity_header(header, role.decode()) for header in values)
+                   for role, values in identities.items()):
+                issues.append((label, 'non-public author or committer identity'))
+            inspect(label, message)
+            # The encoding header can declare a non-UTF-8 commit message. Keep
+            # the raw scan, then also scan Git's normalized original message so
+            # accented identity hints survive decoding. git() disables replaces.
+            recoded = git('-c', 'i18n.logOutputEncoding=UTF-8', 'show', '-s', '--format=%B', commit)
+            if recoded.rstrip(b'\n') != message.rstrip(b'\n'):
+                inspect(label, recoded)
 
     if args.archive:
         with zipfile.ZipFile(args.archive) as archive:
