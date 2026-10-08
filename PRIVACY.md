@@ -12,11 +12,11 @@ Only reviewed source, tests, scripts, and documentation are committed. Build dir
 
 Release archives contain only CmdTabo.app. Packaging remaps source paths, strips debug information, removes extended attributes, and omits source-map files, build caches, diagnostics, and copied third-party apps. Checksums cover the final ZIP bytes.
 
-Before publication, the staged snapshot and reachable Git history are scanned for credentials and for personal paths, email addresses, network addresses, and machine identifiers in both contents and paths. Every historical tree is checked, including renamed files that reuse the same blob and deleted directories. Sensitive diagnostic paths are redacted. The auditor requires author and committer metadata to use a matching public GitHub handle and noreply address; full names and other email addresses fail the check. GitHub bot merge metadata is also permitted. Release contents are checked separately, including strings in the executable, plist metadata, file and directory names in the archive, and extended attributes.
+Before publication, the staged snapshot and reachable Git history are scanned for credentials and for personal paths, email addresses, network addresses, and machine identifiers in both contents and paths. Every historical tree is checked, including renamed files that reuse the same blob and deleted directories. Raw commit headers, continued headers and embedded merge tags are inspected, including tags without a separate reference. Commit messages are also normalized to UTF-8 so older declared encodings do not bypass identity checks. Sensitive diagnostic paths are redacted. The auditor requires author, committer and tagger metadata to use a matching public GitHub handle and noreply address; full names and other email addresses fail the check. GitHub bot merge metadata is also permitted. All Git object reads disable local replacements. Release contents are checked separately, including strings in the executable, plist metadata, file and directory names in the archive, and extended attributes.
 
 ```sh
 python3 scripts/audit-publication.py --history
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.5-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.6-macos-arm64.zip
 ```
 
 A clean scan records what was checked and that no matching data was found; it is not a guarantee against every possible secret format. Review the exact staged files and release contents when publishing changes. Local audit reports are not published.

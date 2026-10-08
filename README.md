@@ -51,7 +51,7 @@ The window probe creates only its own disposable windows and checks real WindowS
 
 ```sh
 bash scripts/package-release.sh
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.5-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.6-macos-arm64.zip
 ```
 
 Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It generates a SHA-256 checksum file alongside the ZIP. Build output and diagnostic data are ignored by Git.
@@ -65,13 +65,13 @@ Release packaging remaps source paths, strips debug information, removes extende
 - Keyboard callbacks only decide which events to consume; window operations and app activation run after the callback returns. Pending actions are discarded when capture stops.
 - System sleep, display sleep and inactive sessions release shortcut ownership and stop polling windows. Capture resumes after all suspension reasons clear, a fresh window query completes and a two-second settling interval passes. A window query stalled for three seconds pauses capture.
 - Secure Input releases native shortcut ownership even if the event tap still reports enabled. Settings show that macOS handles ⌘Tab while secure input is active. Capture resumes after secure input ends and the two-second settling interval passes, provided the app is enabled and no failure or session suspension remains.
-- SkyLight is loaded dynamically to query window tags in a batch. Bit 60 indicates minimization; user-window markers and visible-window history distinguish user windows from invisible helpers. Hidden apps' normal-window markers also count at startup, before any visible-window history exists. Closed-window markers remain excluded; unknown states keep apps available.
+- SkyLight is loaded dynamically to query window tags in a batch. Normal, floating and modal content windows are considered. Menu, status and overlay levels, known floating helpers and fully transparent on-screen windows are excluded. Bit 60 indicates minimization; user-window markers and visible-window history distinguish user windows from invisible helpers. Hidden apps' normal-window markers also count at startup, before any visible-window history exists. Closed-window markers remain excluded; unknown states follow the existing conservative filtering policy.
 - CoreGraphics supplies window bounds and display geometry. Being on another Space does not by itself mean a window is minimized.
 - Window metadata refreshes approximately every 400 ms in the background. Ordering starts from window order and then follows app activations during the session.
 
 Health logs live in `~/Library/Logs/CmdTabo/`, accessible through **Open diagnostic logs**. They include version/build/source state, sleep/wake and Secure Input transitions, capture failures, slow queries and a health summary every 30 seconds. Summaries include aggregate counts of received keyboard events and handled switcher shortcuts, plus the elapsed seconds since the last received event. The app and guardian each keep two rotating logs of approximately 1 MiB each, with owner-only permissions. They contain no key values, app names, window titles or screenshots and are never uploaded.
 
-Private APIs can change between macOS releases. Missing tags or unknown positions keep apps available. Only normal-layer windows of regular apps are considered; apps using floating main windows may need adaptation. Secure Input or other keyboard utilities can affect shortcut capture. Activation follows macOS app activation behavior.
+Private APIs can change between macOS releases. Missing tags or unknown positions keep apps available unless another filter excludes them. Only regular apps are considered. Floating content and torn-off menus share a window level; a floating window without recognizable helper metadata is kept as a candidate. Secure Input or other keyboard utilities can affect shortcut capture. Activation follows macOS app activation behavior.
 
 See [validation](research/switcher-validation.md) for completed checks and outstanding physical-keyboard and multi-display verification. The archived [LaunchServices investigation](research/README.md), [injection prototype](research/dockless-prototype.md), and [copied-app trial](research/cmux-trial.md) are not used by the standalone app or included in its release bundle.
 

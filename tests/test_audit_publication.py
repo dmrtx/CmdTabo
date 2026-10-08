@@ -1,5 +1,6 @@
 """Synthetic publication fixtures; never use workstation or account data."""
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -222,6 +223,92 @@ class PublicationAuditTests(unittest.TestCase):
         public = self.git('rev-parse', 'v-public').decode().strip()
         self.git('replace', private, public)
         self.assert_private_tag_failure(self.run_audit('--history'), self.private_name)
+
+    def raw_commit(self, extra_headers='', parents=(), message='Public fixture', encoding='utf-8'):
+        tree = self.git('write-tree').decode().strip()
+        identity = 'Fixture <fixture' + '@' + 'users.noreply.github.com> 1 +0000'
+        raw = (f'tree {tree}\n' + ''.join(f'parent {parent}\n' for parent in parents)
+               + f'author {identity}\ncommitter {identity}\n' + extra_headers
+               + '\n' + message + '\n')
+        return subprocess.run(['git', '-C', str(self.root), 'hash-object', '-w', '-t', 'commit', '--stdin'],
+                              input=raw.encode(encoding), check=True, capture_output=True).stdout.decode().strip()
+
+    def install_raw_commit(self, extra_headers=''):
+        self.add('safe.txt')
+        commit = self.raw_commit(extra_headers)
+        self.git('update-ref', 'HEAD', commit)
+        return commit
+
+    def assert_private_commit_failure(self, result, *values):
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('commit:', result.stdout)
+        for value in values:
+            self.assertNotIn(value, result.stdout + result.stderr)
+
+    def test_history_checks_raw_commit_headers(self):
+        self.install_raw_commit('review-note ' + self.private_name + '\n')
+        self.assert_private_commit_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_checks_multiline_commit_headers(self):
+        self.install_raw_commit('review-note Public header\n ' + self.private_name + '\n')
+        self.assert_private_commit_failure(self.run_audit('--history'), self.private_name)
+
+    def install_mergetag(self, tagger_email=None, tagger_name='Fixture', message='Public release', extra_headers=''):
+        self.commit_fixture()
+        first = self.git('rev-parse', 'HEAD').decode().strip()
+        second = self.raw_commit(parents=(first,), message='Other branch')
+        email = tagger_email or ('fixture' + '@' + 'users.noreply.github.com')
+        tag = (f'object {second}\ntype commit\ntag v-fixture\n'
+               f'tagger {tagger_name} <{email}> 1 +0000\n' + extra_headers + '\n' + message + '\n')
+        # Git continues the complete annotated tag in the merge's mergetag header.
+        header = 'mergetag ' + tag.rstrip('\n').replace('\n', '\n ') + '\n'
+        commit = self.raw_commit(header, parents=(first, second), message='Merge release')
+        self.git('update-ref', 'HEAD', commit)
+        self.assertEqual(self.git('tag', '--list'), b'')
+        return commit
+
+    def test_history_accepts_public_mergetag_without_tag_ref(self):
+        self.install_mergetag()
+        result = self.run_audit('--history')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_history_rejects_private_mergetag_tagger_without_tag_ref(self):
+        self.install_mergetag(tagger_email=self.private_name)
+        self.assert_private_commit_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_rejects_full_name_in_mergetag_with_noreply(self):
+        self.install_mergetag(tagger_name='Synthetic Full Name')
+        self.assert_private_commit_failure(self.run_audit('--history'), 'Synthetic Full Name')
+
+    def test_history_checks_private_mergetag_message(self):
+        self.install_mergetag(message='Contact: ' + self.private_name)
+        self.assert_private_commit_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_checks_additional_multiline_mergetag_headers(self):
+        self.install_mergetag(extra_headers='review-note Public header\n ' + self.private_name + '\n')
+        self.assert_private_commit_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_reads_original_commit_headers_despite_local_replacements(self):
+        private = self.install_raw_commit('review-note ' + self.private_name + '\n')
+        public = self.raw_commit()
+        self.git('replace', private, public)
+        self.assert_private_commit_failure(self.run_audit('--history'), self.private_name)
+
+    def test_history_recodes_non_utf8_commit_message_before_identity_scan(self):
+        self.add('safe.txt')
+        hint = 'Fixturé Personal'
+        private = self.raw_commit('encoding ISO-8859-1\n', message='Contact: ' + hint,
+                                  encoding='iso-8859-1')
+        self.git('update-ref', 'HEAD', private)
+        # Git settings can request another output encoding. The auditor must
+        # explicitly normalize Git's original commit message to UTF-8.
+        self.git('config', 'i18n.logOutputEncoding', 'ISO-8859-1')
+        global_config = self.root / 'fixture-global-config'
+        global_config.write_text('[user]\n    name = ' + hint + '\n')
+        environment = {**os.environ, 'GIT_CONFIG_GLOBAL': str(global_config)}
+        result = subprocess.run([sys.executable, str(AUDITOR), '--history'], cwd=self.root,
+                                capture_output=True, text=True, env=environment)
+        self.assert_private_commit_failure(result, hint)
 
 
 if __name__ == '__main__':
