@@ -19,9 +19,10 @@ struct KeyboardDeliveryMonitor {
 
     mutating func reset() { previous = nil; missingSince = nil }
 
-    mutating func observe(active: Bool, systemKeyDowns: UInt32, deliveredKeyDowns: UInt64,
+    mutating func observe(active: Bool, systemKeyDowns readSystemKeyDowns: @autoclosure () -> UInt32, deliveredKeyDowns: UInt64,
                           now: TimeInterval) -> Bool {
         guard active else { reset(); return false }
+        let systemKeyDowns = readSystemKeyDowns()
         let current = Sample(system: systemKeyDowns, delivered: deliveredKeyDowns, time: now)
         defer { self.previous = current }
         guard let previous else { return false }
