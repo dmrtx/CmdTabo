@@ -21,7 +21,9 @@ The release is experimental, ad hoc signed, and not notarized. macOS may require
 2. Hold ⌘ and press Tab to move forward; ⌘⇧Tab moves backward.
 3. Release ⌘ to activate the selected app. Esc cancels; clicking an icon also switches apps.
 
-The menu bar icon opens **CmdTabo Settings…**, **Preview switcher**, **Pause / resume**, **Open diagnostic logs**, and **Quit CmdTabo**. Settings group the independent filters with short explanations, show the keyboard shortcuts, and clearly indicate whether Accessibility is granted. The permission button appears only when access is needed. Preview works with the mouse before granting Accessibility. Unchecking **Use CmdTabo for ⌘Tab**, pausing, or quitting restores the original macOS shortcuts.
+The menu bar icon opens **CmdTabo Settings…**, **Preview switcher**, **Pause / resume**, **Open diagnostic logs**, and **Quit CmdTabo**. Settings group the independent filters with short explanations, show the keyboard shortcuts, version and build, and clearly indicate whether Accessibility is granted. The permission button appears only when access is needed. Preview works with the mouse before granting Accessibility. Unchecking **Use CmdTabo for ⌘Tab**, pausing, or quitting restores the original macOS shortcuts.
+
+There is no automatic updater. To update, quit the running copy, replace CmdTabo.app with the new release, reopen it and check the version/build in Settings. Downloading a ZIP does not update an already running process.
 
 All four filter settings are saved independently. Permission changes are checked automatically without prompting. If a fresh process confirms the grant while the running process still reports it missing, CmdTabo reopens itself once; it never restarts in a loop. Rebuilding or replacing an ad hoc signed app may still require removing and re-adding it in Accessibility. The app cannot grant itself access.
 
@@ -51,7 +53,7 @@ The window probe creates only its own disposable windows and checks real WindowS
 
 ```sh
 bash scripts/package-release.sh
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.6-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.7-macos-arm64.zip
 ```
 
 Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It generates a SHA-256 checksum file alongside the ZIP. Build output and diagnostic data are ignored by Git.
@@ -65,6 +67,7 @@ Release packaging remaps source paths, strips debug information, removes extende
 - Keyboard callbacks only decide which events to consume; window operations and app activation run after the callback returns. Pending actions are discarded when capture stops.
 - System sleep, display sleep and inactive sessions release shortcut ownership and stop polling windows. Capture resumes after all suspension reasons clear, a fresh window query completes and a two-second settling interval passes. A window query stalled for three seconds pauses capture.
 - Secure Input releases native shortcut ownership even if the event tap still reports enabled. Settings show that macOS handles ⌘Tab while secure input is active. Capture resumes after secure input ends and the two-second settling interval passes, provided the app is enabled and no failure or session suspension remains.
+- While capture owns the shortcuts, an aggregate hardware key-down counter is compared with received key-down progress. Two seconds of regularly sampled missing delivery restores native shortcuts, stops capture and requires an explicit resume. Idle never triggers this check. Delayed sampling, sleep, pause and counter resets discard earlier evidence; received autorepeat counts as live delivery. This conservative fallback indicates missing delivery, not its cause, and cannot detect it if the hardware counter is unavailable or unchanged.
 - SkyLight is loaded dynamically to query window tags in a batch. Normal, floating and modal content windows are considered. Menu, status and overlay levels, known floating helpers and fully transparent on-screen windows are excluded. Bit 60 indicates minimization; user-window markers and visible-window history distinguish user windows from invisible helpers. Hidden apps' normal-window markers also count at startup, before any visible-window history exists. Closed-window markers remain excluded; unknown states follow the existing conservative filtering policy.
 - CoreGraphics supplies window bounds and display geometry. Being on another Space does not by itself mean a window is minimized.
 - Window metadata refreshes approximately every 400 ms in the background. Ordering starts from window order and then follows app activations during the session.
