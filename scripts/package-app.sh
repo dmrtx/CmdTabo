@@ -29,6 +29,8 @@ else
   BUILD_NUMBER=${BUILD_NUMBER:-1}
 fi
 
+source "$ROOT/update-config.env"
+
 ARCH_LIST=( ${ARCHES:-} )
 if [[ ${#ARCH_LIST[@]} -eq 0 ]]; then
   HOST_ARCH=$(uname -m)
@@ -45,7 +47,7 @@ if [[ "$CONF" == "release" ]]; then
 fi
 
 for ARCH in "${ARCH_LIST[@]}"; do
-  swift build -c "$CONF" --arch "$ARCH" "${SWIFT_FLAGS[@]}"
+  swift build --disable-keychain -c "$CONF" --arch "$ARCH" "${SWIFT_FLAGS[@]}"
 done
 
 ensure_app_stopped
@@ -87,6 +89,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconFile</key><string>Icon</string>
     <key>GitCommit</key><string>${GIT_COMMIT}</string>
     <key>SourceState</key><string>${SOURCE_STATE}</string>
+    <key>SUFeedURL</key><string>${SPARKLE_FEED_URL}</string>
+    <key>SUPublicEDKey</key><string>${SPARKLE_PUBLIC_KEY}</string>
+    <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUScheduledCheckInterval</key><integer>21600</integer>
+    <key>SUAutomaticallyUpdate</key><true/>
+    <key>SUEnableSystemProfiling</key><false/>
+    <key>SUVerifyUpdateBeforeExtraction</key><true/>
+    <key>SURequireSignedFeed</key><true/>
+    <key>SUSignedFeedFailureExpirationInterval</key><integer>0</integer>
 </dict>
 </plist>
 PLIST
@@ -95,7 +106,7 @@ build_product_path() {
   local name="$1"
   local arch="$2"
   local bin_dir
-  bin_dir=$(swift build -c "$CONF" --arch "$arch" --show-bin-path)
+  bin_dir=$(swift build --disable-keychain -c "$CONF" --arch "$arch" --show-bin-path)
   echo "$bin_dir/$name"
 }
 
@@ -164,16 +175,21 @@ if [[ ${#SWIFTPM_BUNDLES[@]} -gt 0 ]]; then
   done
 fi
 
-# Embed frameworks if any exist in the build folder.
-FRAMEWORK_DIRS=(".build/$CONF" ".build/${ARCH_LIST[0]}-apple-macosx/$CONF")
-for dir in "${FRAMEWORK_DIRS[@]}"; do
-  if compgen -G "${dir}/*.framework" >/dev/null; then
-    cp -R "${dir}/"*.framework "$APP/Contents/Frameworks/"
-    chmod -R a+rX "$APP/Contents/Frameworks"
-    install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$APP_NAME"
-    break
-  fi
+# SwiftPM links the binary artifact directly; it need not copy it beside the app.
+SPARKLE_FRAMEWORK="$ROOT/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+if [[ ! -d "$SPARKLE_FRAMEWORK" ]]; then
+  echo "ERROR: Sparkle binary artifact is missing." >&2
+  exit 1
+fi
+cp -R "$SPARKLE_FRAMEWORK" "$APP/Contents/Frameworks/"
+# Development headers/modules have no runtime purpose. Remove links and targets.
+for part in Headers PrivateHeaders Modules; do
+  rm -rf "$APP/Contents/Frameworks/Sparkle.framework/$part" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/$part"
 done
+chmod -R a+rX "$APP/Contents/Frameworks"
+if ! otool -l "$APP/Contents/MacOS/$APP_NAME" | grep -q '@executable_path/../Frameworks'; then
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$APP_NAME"
+fi
 
 if [[ -f "$ICON_TARGET" ]]; then
   cp "$ICON_TARGET" "$APP/Contents/Resources/Icon.icns"
@@ -219,6 +235,10 @@ sign_frameworks() {
     while IFS= read -r -d '' bin; do
       codesign "${CODESIGN_ARGS[@]}" "$bin"
     done < <(find "$fw" -type f -perm -111 -print0)
+    # Sign nested code bundles from the inside out before sealing the framework.
+    while IFS= read -r -d '' bundle; do
+      codesign "${CODESIGN_ARGS[@]}" "$bundle"
+    done < <(find "$fw" -depth -type d \( -name '*.xpc' -o -name '*.app' \) -print0)
     codesign "${CODESIGN_ARGS[@]}" "$fw"
   done
 }
@@ -227,5 +247,7 @@ sign_frameworks
 codesign "${CODESIGN_ARGS[@]}" \
   --entitlements "$APP_ENTITLEMENTS" \
   "$APP"
+
+codesign --verify --deep --strict "$APP"
 
 echo "Created $APP"
