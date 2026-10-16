@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         createSettings()
         updates.onWillRelaunch = { [weak self] in self?.prepareForUpdate() }
         updates.onUpdateReady = { [weak self] available in
-            self?.statusItem.button?.image = NSImage(systemSymbolName: available ? "arrow.down.circle.fill" : "square.stack.3d.up", accessibilityDescription: available ? "CmdTabo update available" : "CmdTabo")
+            self?.statusItem.button?.image = MenuBarIcon.image(updateAvailable: available)
         }
         updates.start()
         accessibility.onChange = { [weak self] trusted in
@@ -263,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private func createStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "CmdTabo")
+        statusItem.button?.image = MenuBarIcon.image()
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: versionLabel, action: nil, keyEquivalent: ""))
         menu.addItem(.separator())

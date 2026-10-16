@@ -8,7 +8,8 @@ remain. No local paths, credentials or account information are embedded.
 
 `scripts/build-icon.sh` derives the 16–1024 px macOS icon set and `Icon.icns` in
 the ignored `build/icon/` directory. Packaging installs that file as the bundle’s
-icon; Settings loads the same icon. The menu bar retains its monochrome symbol.
+icon; Settings loads the same icon. The menu bar uses a matching vector template
+drawn by `MenuBarIcon.swift`: two windows and a Tab arrow, with a small update dot.
 
 The publication auditor permits the exact reviewed source bytes by SHA-256.
 Changes to the image require another content/metadata review and a new digest;
