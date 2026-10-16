@@ -3,6 +3,17 @@ import XCTest
 @testable import CmdTabo
 
 final class KeyboardDeliveryMonitorTests: XCTestCase {
+    func testInactiveCaptureDoesNotReadHardwareActivity() {
+        var monitor = KeyboardDeliveryMonitor()
+        var reads = 0
+        func hardwareCount() -> UInt32 { reads += 1; return 100 }
+        XCTAssertFalse(monitor.observe(active: false, systemKeyDowns: hardwareCount(), deliveredKeyDowns: 0, now: 0))
+        XCTAssertEqual(reads, 0)
+        XCTAssertFalse(monitor.observe(active: true, systemKeyDowns: hardwareCount(), deliveredKeyDowns: 0, now: 0.5))
+        XCTAssertEqual(reads, 1)
+        XCTAssertFalse(monitor.observe(active: false, systemKeyDowns: hardwareCount(), deliveredKeyDowns: 0, now: 1))
+        XCTAssertEqual(reads, 1)
+    }
     func testEnabledButSilentTapRestoresNativeShortcutsAndLatchesFailureAcrossWake() {
         let keyboard = KeyboardOwnershipTests.Capture(), native = KeyboardOwnershipTests.Native()
         var lifecycle = CaptureLifecycle()
