@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var accessibilityButton: NSButton!
     private var heartbeat: Timer?
     private var lifecycle = CaptureLifecycle()
+    private var deliveryMonitor = KeyboardDeliveryMonitor()
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var lastHealth: TimeInterval = 0
     private let accessibility = AccessibilityMonitor()
@@ -132,6 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             // No AppKit window calls until the tap and native override are gone.
             self.nativeCommandTab.restore()
+            self.deliveryMonitor.reset()
             self.keyboard.stop()
         }
         let center = NSWorkspace.shared.notificationCenter
@@ -200,9 +202,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if lifecycle.updateSecureInput(IsSecureEventInputEnabled(), now: now) {
             DiagnosticLog.shared.record("secure input \(lifecycle.secureInputEnabled ? "enabled; native shortcuts restored" : "disabled; capture settling")")
         }
-        if !KeyboardOwnership.reconcile(eligible: !relaunching && enabled && accessibility.trusted && catalog.ready && lifecycle.permitsCapture(now: ProcessInfo.processInfo.systemUptime),
-                                        keyboard: keyboard, native: nativeCommandTab) {
+        let eligible = !relaunching && enabled && accessibility.trusted && catalog.ready && lifecycle.permitsCapture(now: now)
+        let wasCapturing = eligible && keyboard.running && nativeCommandTab.isOverridden
+        let stalled = deliveryMonitor.observe(active: wasCapturing,
+                                              systemKeyDowns: CGEventSource.counterForEventType(.hidSystemState, eventType: .keyDown),
+                                              deliveredKeyDowns: keyboard.keyDownCount, now: now)
+        if stalled { DiagnosticLog.shared.record("capture delivery stalled; hardware key-down activity without tap delivery") }
+        if !KeyboardOwnership.reconcile(eligible: eligible, keyboard: keyboard, native: nativeCommandTab,
+                                        deliveryStalled: stalled) {
             captureFailed()
+        } else if !wasCapturing && eligible && keyboard.running && nativeCommandTab.isOverridden {
+            // Arm a new acquisition without carrying input from sleep or pause.
+            _ = deliveryMonitor.observe(active: true,
+                                        systemKeyDowns: CGEventSource.counterForEventType(.hidSystemState, eventType: .keyDown),
+                                        deliveredKeyDowns: keyboard.keyDownCount,
+                                        now: ProcessInfo.processInfo.systemUptime)
         }
         updateStatus()
     }
@@ -383,7 +397,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let buttons = NSStackView(views: [accessibilityButton, previewButton])
         buttons.orientation = .horizontal
         buttons.spacing = 8
-        let privacy = label("Local only · No screen capture", size: 10)
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "development"
+        let build = info["CFBundleVersion"] as? String ?? "unknown"
+        let privacy = column([label("Version \(version) · build \(build)", size: 10),
+                              label("Local only · No screen capture", size: 10)], spacing: 3)
         let footer = NSStackView(views: [privacy, NSView(), buttons])
         footer.orientation = .horizontal
         footer.alignment = .centerY

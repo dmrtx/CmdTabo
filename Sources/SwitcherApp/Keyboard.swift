@@ -12,6 +12,7 @@ final class Keyboard: KeyboardCapture {
     private var failed = false
     private var failurePending = false
     private(set) var eventCount = 0
+    private(set) var keyDownCount: UInt64 = 0
     private(set) var shortcutCount = 0
     private(set) var lastEventTime: TimeInterval?
     var isShowing: () -> Bool = { false }
@@ -114,6 +115,7 @@ final class Keyboard: KeyboardCapture {
             eventCount += 1
             lastEventTime = ProcessInfo.processInfo.systemUptime
         }
+        if type == .keyDown { keyDownCount &+= 1 }
         let sessionShowing = queuedSession ?? (pendingSession || isShowing())
         if type == .flagsChanged {
             if sessionShowing && (pendingSession || shouldConfirmOnCommandRelease()) && !event.flags.contains(.maskCommand) {
