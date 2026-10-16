@@ -15,7 +15,7 @@ An app with eligible windows on both displays appears on both. Windows spanning 
 
 Get the Apple Silicon build from [Releases](https://github.com/dmrtx/CmdTabo/releases), extract the ZIP, and move **CmdTabo.app** to a stable location such as Applications.
 
-The release is experimental, ad hoc signed, and not notarized. macOS may require approving the app in System Settings → Privacy & Security before it opens. The deployment target is macOS 13; runtime validation has been performed on macOS 27, Apple Silicon. Compatibility with other macOS versions is not yet verified.
+The release is experimental, signed with a persistent local certificate, and not notarized. This signature provides a stable app identity; it is not Developer ID and does not remove macOS opening warnings. macOS may require approving the app in System Settings → Privacy & Security before it opens. The deployment target is macOS 13; runtime validation has been performed on macOS 27, Apple Silicon. Compatibility with other macOS versions is not yet verified.
 
 1. Open CmdTabo and click **Grant Accessibility**. Enable it in System Settings → Privacy & Security → Accessibility. On macOS 27 this pane is named **Device Control and Data Access**.
 2. Hold ⌘ and press Tab to move forward; ⌘⇧Tab moves backward.
@@ -27,7 +27,7 @@ Starting with v0.1.7, CmdTabo checks GitHub for updates approximately every six 
 
 Releases before v0.1.7 have no updater. Install the current release once by quitting the running copy, replacing CmdTabo.app and reopening it; subsequent updates use the built-in updater. Keep the app in a stable, writable location such as Applications. Downloading a ZIP alone does not update an already running process. macOS may request authorization if the installation location is not writable.
 
-All four filter settings are saved independently. Permission changes are checked automatically without prompting. If a fresh process confirms the grant while the running process still reports it missing, CmdTabo reopens itself once; it never restarts in a loop. Rebuilding or replacing an ad hoc signed app may still require removing and re-adding it in Accessibility. The app cannot grant itself access.
+All four filter settings are saved independently. Permission changes are checked automatically without prompting. If a fresh process confirms the grant while the running process still reports it missing, CmdTabo reopens itself once; it never restarts in a loop. **Updating from v0.1.9 or earlier to v0.1.10 changes the signing identity and can require renewing Accessibility once.** Quit CmdTabo, remove the old entry in Accessibility, add the updated app and reopen it. Later releases keep the same certificate, bundle identifier and designated requirement so updates can retain that grant. Keep the app at the same installation path. No certificate installation is needed on the receiving Mac. The app cannot grant itself access or override macOS permission decisions.
 
 ## Permissions and privacy
 
@@ -44,7 +44,7 @@ Quit the packaged app before rebuilding; the packaging script refuses to overwri
 ```sh
 swift test --disable-keychain
 python3 -m unittest discover -s tests -p 'test_*.py'
-bash scripts/package-app.sh release
+SIGNING_MODE=adhoc bash scripts/package-app.sh release
 open build/CmdTabo.app
 build/CmdTabo.app/Contents/MacOS/CmdTabo --self-test-windows
 build/CmdTabo.app/Contents/MacOS/CmdTabo --native-status
@@ -54,11 +54,15 @@ build/CmdTabo.app/Contents/MacOS/CmdTabo --accessibility-status
 The window probe creates only its own disposable windows and checks real WindowServer states. `--native-status` reads the two original switcher shortcut states without changing them. `--diagnose` is a separate, opt-in local diagnostic.
 
 ```sh
+bash scripts/check-signing-identity.sh
+bash scripts/test-signing-continuity.sh
 bash scripts/package-release.sh
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.9-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.10-macos-arm64.zip
 ```
 
-Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It preserves internal framework symlinks and executable permissions, verifies nested signatures, and generates a SHA-256 checksum file alongside the ZIP. Sparkle validates Ed25519 signatures on both the feed and archive before extraction. App source paths are remapped; developer headers and modules are omitted from the embedded framework.
+Release packaging requires the existing local certificate and private key in the maintainer's login Keychain. It fails if that identity is missing, differs from the public pins in `signing-config.env`, or ad hoc signing was requested. It never generates a new identity. Disposable development builds can explicitly use `SIGNING_MODE=adhoc`; their Accessibility grants do not carry across builds.
+
+Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It preserves internal framework symlinks and executable permissions, verifies nested signatures and certificate pins, and generates a SHA-256 checksum file alongside the ZIP. Sparkle validates Ed25519 signatures on both the feed and archive before extraction. App source paths are remapped; developer headers and modules are omitted from the embedded framework.
 
 For publishing an update, see [the release workflow](docs/releasing.md). Build output and diagnostic data are ignored by Git.
 

@@ -9,8 +9,7 @@ APP_NAME=${APP_NAME:-CmdTabo}
 BUNDLE_ID=${BUNDLE_ID:-local.cmdtabo.switcher}
 MACOS_MIN_VERSION=${MACOS_MIN_VERSION:-13.0}
 MENU_BAR_APP=${MENU_BAR_APP:-1}
-SIGNING_MODE=${SIGNING_MODE:-}
-APP_IDENTITY=${APP_IDENTITY:-}
+SIGNING_MODE=${SIGNING_MODE:-local}
 APP="$ROOT/build/${APP_NAME}.app"
 
 ensure_app_stopped() {
@@ -30,6 +29,26 @@ else
 fi
 
 source "$ROOT/update-config.env"
+source "$ROOT/signing-config.env"
+
+case "$SIGNING_MODE" in
+  local)
+    if [[ -n "${APP_IDENTITY:-}" && "$APP_IDENTITY" != "$SIGNING_CERT_SHA1" ]]; then
+      echo 'APP_IDENTITY must match the pinned CmdTabo certificate.' >&2
+      exit 1
+    fi
+    bash "$ROOT/scripts/check-signing-identity.sh"
+    # No hardened runtime: a self-signed identity has no Apple Team ID and
+    # library validation would reject the embedded Sparkle framework.
+    CODESIGN_ARGS=(--force --sign "$SIGNING_CERT_SHA1" --timestamp=none)
+    APP_REQUIREMENT="designated => identifier \"$BUNDLE_ID\" and certificate leaf = H\"$SIGNING_CERT_SHA1\""
+    ;;
+  adhoc)
+    # Explicit opt-in for disposable development builds only.
+    CODESIGN_ARGS=(--force --sign -)
+    ;;
+  *) echo 'SIGNING_MODE must be local or adhoc.' >&2; exit 1 ;;
+esac
 
 ARCH_LIST=( ${ARCHES:-} )
 if [[ ${#ARCH_LIST[@]} -eq 0 ]]; then
@@ -215,12 +234,6 @@ if [[ ! -f "$APP_ENTITLEMENTS" ]]; then
 PLIST
 fi
 
-if [[ "$SIGNING_MODE" == "adhoc" || -z "$APP_IDENTITY" ]]; then
-  CODESIGN_ARGS=(--force --sign "-")
-else
-  CODESIGN_ARGS=(--force --timestamp --options runtime --sign "$APP_IDENTITY")
-fi
-
 # Sign embedded frameworks and their nested binaries before the app bundle.
 sign_frameworks() {
   local fw
@@ -240,10 +253,17 @@ sign_frameworks() {
 }
 sign_frameworks
 
-codesign "${CODESIGN_ARGS[@]}" \
+APP_SIGNING_ARGS=("${CODESIGN_ARGS[@]}")
+if [[ "$SIGNING_MODE" == local ]]; then
+  APP_SIGNING_ARGS+=(--requirements "=$APP_REQUIREMENT")
+fi
+codesign "${APP_SIGNING_ARGS[@]}" \
   --entitlements "$APP_ENTITLEMENTS" \
   "$APP"
 
 codesign --verify --deep --strict "$APP"
+if [[ "$SIGNING_MODE" == local ]]; then
+  python3 "$ROOT/scripts/verify-code-signature.py" "$APP" --bundle-id "$BUNDLE_ID"
+fi
 
 echo "Created $APP"

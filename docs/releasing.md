@@ -7,6 +7,38 @@ experimental releases. This avoids GitHub’s `latest` endpoint excluding prerel
 
 ## Signing tools and key
 
+There are two independent signing identities:
+
+- `signing-config.env` pins the persistent **CmdTabo Local Signing** certificate
+  used by `codesign`. Its private key and certificate stay in the login Keychain.
+  This is a self-signed code identity, with no Apple Team ID or notarization.
+- `update-config.env` pins the existing Sparkle Ed25519 public key. Keep that
+  update key unchanged when migrating from ad hoc to local code signing.
+
+The code certificate is valid until October 2036. Never recreate it just because
+the certificate name is the same: TCC tracks the certificate, not its display name.
+Back up the original identity securely using Keychain Access's encrypted identity
+export. Keep that backup and its password outside Git and release assets. On a
+new build Mac, restore the original identity rather than generating another one.
+Neither packaging nor preflight creates keys or changes certificate trust.
+Receiving Macs do not need to import or trust this certificate.
+
+Run `bash scripts/check-signing-identity.sh` before packaging. It requires the
+exact certificate and private identity. A Keychain prompt from `codesign` is for
+using this local private key; authorize it directly in macOS. Choosing **Always
+Allow** for `/usr/bin/codesign` avoids repeating this prompt for each nested helper.
+Never enter a Keychain password into a shell command or chat.
+
+Run `bash scripts/test-signing-continuity.sh` to compile two different executables
+with the same bundle identity and certificate. It checks matching designated
+requirements, cross-validates both builds and rejects ad hoc code, changed
+identifiers and tampered bytes. `verify-code-signature.py` also checks every
+nested code object's certificate, helper identifiers and effective flags.
+The main app requirement pins both `local.cmdtabo.switcher` and the exact leaf
+certificate. Nested bundles retain their own identifiers. Hardened runtime and
+library validation remain disabled: the local certificate has no Apple Team ID.
+This does not change Gatekeeper settings or certificate trust on the build Mac.
+
 Download `Sparkle-2.10.0.tar.xz` from the official
 [Sparkle release](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0).
 Extract it outside the repository and set `SPARKLE_BIN` to its `bin` directory.
@@ -29,7 +61,8 @@ Back up the signing key securely according to
    and Python tests, review changes, and merge the release source into
    `main`. Create the version tag using the public Git identity. Build only from a
    clean checkout so the app’s source metadata identifies the tagged commit.
-3. Run `bash scripts/package-release.sh`. It verifies nested signatures, creates
+3. Run `bash scripts/package-release.sh`. It refuses ad hoc or unpinned signing,
+   verifies nested signatures and certificate identity, creates
    the ZIP and `SHA256SUMS.txt`, and scans publication contents and Git history.
 4. Run `SPARKLE_BIN=/path/to/sparkle/bin bash scripts/make-appcast.sh`. It creates
    `build/releases/appcast.xml`, preserving up to three previous feed entries,
@@ -62,8 +95,12 @@ persist the user’s automatic-check and automatic-download preferences.
 
 The first updater-capable release must be installed once over an older release.
 Updates replace the app at its existing location; a non-writable location can
-require macOS authorization. CmdTabo releases remain ad hoc signed and unnotarized.
-Ed25519 authenticates updates, but does not replace Developer ID or notarization.
-macOS may require renewing Accessibility after the app’s code signature changes.
+require macOS authorization. From v0.1.10 onward, releases use the persistent local
+certificate and remain unnotarized. Ed25519 authenticates updates, but does not
+replace Developer ID or notarization. Migrating from earlier ad hoc releases can
+require renewing Accessibility once. Subsequent releases preserve the same
+certificate, identifier and designated requirement so TCC can recognize the app
+across code changes. Keep its installation path stable. Permission decisions
+remain controlled by macOS; retention on the other physical Mac is not yet verified.
 CmdTabo releases native shortcut ownership before an updater relaunch and during
 normal termination, so installation does not leave the old capture active.
