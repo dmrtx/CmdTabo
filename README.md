@@ -21,7 +21,7 @@ The release is experimental, ad hoc signed, and not notarized. macOS may require
 2. Hold ⌘ and press Tab to move forward; ⌘⇧Tab moves backward.
 3. Release ⌘ to activate the selected app. Esc cancels; clicking an icon also switches apps.
 
-The menu bar shows the installed version and build immediately, followed by **CmdTabo Settings…**, **Preview switcher**, **Pause / resume**, **Open diagnostic logs**, update controls, and **Quit CmdTabo**. Settings group the independent filters with short explanations, show the keyboard shortcuts, version and build, and clearly indicate whether Accessibility is granted. The permission button appears only when access is needed. Preview works with the mouse before granting Accessibility. Unchecking **Use CmdTabo for ⌘Tab**, pausing, or quitting restores the original macOS shortcuts.
+The menu bar uses a matching two-window Tab icon that adapts to light and dark backgrounds, with a small dot for an available update. It shows the installed version and build immediately, followed by **CmdTabo Settings…**, **Preview switcher**, **Pause / resume**, **Open diagnostic logs**, update controls, and **Quit CmdTabo**. Settings group the independent filters with short explanations, show the keyboard shortcuts, version and build, and clearly indicate whether Accessibility is granted. The permission button appears only when access is needed. Preview works with the mouse before granting Accessibility. Unchecking **Use CmdTabo for ⌘Tab**, pausing, or quitting restores the original macOS shortcuts.
 
 Starting with v0.1.7, CmdTabo checks GitHub for updates approximately every six hours while running and downloads signed updates automatically. A downloaded update is installed when you quit; **Check for Updates…** also lets you install and reopen immediately. A menu indicator shows when an update is available or ready. Scheduled checks do not activate windows or interrupt switching. Both automatic checks and downloads can be disabled from the menu; your choices persist across launches.
 
@@ -55,7 +55,7 @@ The window probe creates only its own disposable windows and checks real WindowS
 
 ```sh
 bash scripts/package-release.sh
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.8-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.9-macos-arm64.zip
 ```
 
 Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It preserves internal framework symlinks and executable permissions, verifies nested signatures, and generates a SHA-256 checksum file alongside the ZIP. Sparkle validates Ed25519 signatures on both the feed and archive before extraction. App source paths are remapped; developer headers and modules are omitted from the embedded framework.
