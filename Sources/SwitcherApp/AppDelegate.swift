@@ -346,10 +346,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let mark = NSImageView()
-        mark.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: nil)
+        mark.image = NSImage(named: "Icon") ?? NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: nil)
         mark.setAccessibilityElement(false)
-        mark.contentTintColor = .controlAccentColor
-        mark.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 30, weight: .medium)
         mark.widthAnchor.constraint(equalToConstant: 42).isActive = true
         mark.heightAnchor.constraint(equalToConstant: 42).isActive = true
         let heading = column([label("CmdTabo", size: 25, weight: .semibold, color: .labelColor),

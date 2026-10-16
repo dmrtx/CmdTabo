@@ -54,6 +54,52 @@ class PublicationAuditTests(unittest.TestCase):
         result = self.run_audit('--archive', str(archive))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def add_icon(self, contents=None):
+        path = self.root / 'assets/CmdTabo.png'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents if contents is not None else (AUDITOR.parent.parent / 'assets/CmdTabo.png').read_bytes())
+        self.git('add', '--', 'assets/CmdTabo.png')
+
+    def test_exact_reviewed_artwork_is_allowed_in_index_and_history(self):
+        self.add_icon()
+        self.git('commit', '-qm', 'Reviewed icon fixture')
+        result = self.run_audit('--history')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_modified_reviewed_artwork_is_rejected_and_contents_remain_redacted(self):
+        self.add_icon((AUDITOR.parent.parent / 'assets/CmdTabo.png').read_bytes() + b'\0' + self.private_name.encode())
+        result = self.run_audit()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('binary file in source', result.stdout)
+        self.assertNotIn(self.private_name, result.stdout + result.stderr)
+
+    def test_other_binary_artwork_is_not_allowed_by_extension(self):
+        self.add_icon(b'\x89PNG\r\n\x1a\n\0unreviewed artwork fixture')
+        result = self.run_audit()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('binary file in source', result.stdout)
+
+    def test_invalid_bytes_do_not_join_fragments_into_an_invented_email(self):
+        self.assertNotIn('email in file content', audit.findings(b'fragment@\xffexample.invalid', []))
+
+    def test_contiguous_private_content_in_binary_bytes_is_still_detected(self):
+        values = [('email in file content', self.private_name.encode()),
+                  ('personal home path', b'/Users/' + b'fixture-account/repository/'),
+                  ('GitHub credential', b'ghp_' + b'A' * 40)]
+        for reason, value in values:
+            with self.subTest(reason=reason):
+                self.assertIn(reason, audit.findings(b'\x00\xff' + value + b'\xff', []))
+
+    def test_reviewed_artwork_does_not_bypass_private_historical_paths(self):
+        self.add_icon()
+        self.git('commit', '-qm', 'Reviewed icon fixture')
+        self.git('mv', 'assets/CmdTabo.png', self.private_name + '.png')
+        self.git('commit', '-qm', 'Renamed reviewed icon fixture')
+        self.git('mv', self.private_name + '.png', 'assets/CmdTabo.png')
+        self.git('commit', '-qm', 'Restored reviewed icon fixture')
+        self.assertEqual(self.run_audit().returncode, 0)
+        self.assert_redacted_failure(self.run_audit('--history'), self.private_name)
+
     def test_index_filename_and_directory_names_are_redacted(self):
         for name in [self.private_name + '.txt', self.private_name + '/safe.txt']:
             self.add(name)

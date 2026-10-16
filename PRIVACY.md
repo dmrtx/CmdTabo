@@ -12,7 +12,7 @@ The opt-in `--diagnose` command prints local app/display/window metadata. Local 
 
 ## Publication boundary
 
-Only reviewed source, tests, scripts, and documentation are committed. Build directories, trial app copies, diagnostic JSON, logs, caches, credentials, signing material, local configuration, and OS metadata are ignored.
+Only reviewed source, tests, scripts, documentation, and the reviewed application icon are committed. The PNG master contains only image/color chunks and is permitted by an exact SHA-256 digest; changes require another review and digest update. File extensions alone do not permit binary source assets. Content and path checks still apply. Invalid UTF-8 bytes remain separators during scans rather than being removed and accidentally joining unrelated image bytes. Build directories, trial app copies, diagnostic JSON, logs, caches, credentials, signing material, local configuration, and OS metadata are ignored.
 
 Release archives contain only CmdTabo.app, including Sparkle’s runtime framework and temporary updater helpers. Only safe, relative symlinks confined to that framework are permitted. Developer headers and modules are excluded. Packaging remaps source paths, strips debug information, removes extended attributes, and omits source-map files, build caches, diagnostics, and copied third-party apps. Checksums cover the final ZIP bytes.
 
@@ -20,7 +20,7 @@ Before publication, the staged snapshot and reachable Git history are scanned fo
 
 ```sh
 python3 scripts/audit-publication.py --history
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.7-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.8-macos-arm64.zip
 ```
 
 A clean scan records what was checked and that no matching data was found; it is not a guarantee against every possible secret format. Review the exact staged files and release contents when publishing changes. Local audit reports are not published.
