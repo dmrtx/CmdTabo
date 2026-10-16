@@ -21,15 +21,17 @@ The release is experimental, ad hoc signed, and not notarized. macOS may require
 2. Hold ⌘ and press Tab to move forward; ⌘⇧Tab moves backward.
 3. Release ⌘ to activate the selected app. Esc cancels; clicking an icon also switches apps.
 
-The menu bar icon opens **CmdTabo Settings…**, **Preview switcher**, **Pause / resume**, **Open diagnostic logs**, and **Quit CmdTabo**. Settings group the independent filters with short explanations, show the keyboard shortcuts, version and build, and clearly indicate whether Accessibility is granted. The permission button appears only when access is needed. Preview works with the mouse before granting Accessibility. Unchecking **Use CmdTabo for ⌘Tab**, pausing, or quitting restores the original macOS shortcuts.
+The menu bar shows the installed version and build immediately, followed by **CmdTabo Settings…**, **Preview switcher**, **Pause / resume**, **Open diagnostic logs**, update controls, and **Quit CmdTabo**. Settings group the independent filters with short explanations, show the keyboard shortcuts, version and build, and clearly indicate whether Accessibility is granted. The permission button appears only when access is needed. Preview works with the mouse before granting Accessibility. Unchecking **Use CmdTabo for ⌘Tab**, pausing, or quitting restores the original macOS shortcuts.
 
-There is no automatic updater. To update, quit the running copy, replace CmdTabo.app with the new release, reopen it and check the version/build in Settings. Downloading a ZIP does not update an already running process.
+Starting with v0.1.7, CmdTabo checks GitHub for updates approximately every six hours while running and downloads signed updates automatically. A downloaded update is installed when you quit; **Check for Updates…** also lets you install and reopen immediately. A menu indicator shows when an update is available or ready. Scheduled checks do not activate windows or interrupt switching. Both automatic checks and downloads can be disabled from the menu; your choices persist across launches.
+
+Older releases have no updater. Install v0.1.7 once by quitting the running copy, replacing CmdTabo.app and reopening it; subsequent updates use the built-in updater. Keep the app in a stable, writable location such as Applications. Downloading a ZIP alone does not update an already running process. macOS may request authorization if the installation location is not writable.
 
 All four filter settings are saved independently. Permission changes are checked automatically without prompting. If a fresh process confirms the grant while the running process still reports it missing, CmdTabo reopens itself once; it never restarts in a loop. Rebuilding or replacing an ad hoc signed app may still require removing and re-adding it in Accessibility. The app cannot grant itself access.
 
 ## Permissions and privacy
 
-CmdTabo requests **Accessibility only**, to intercept the switcher shortcut. It does not request Screen Recording or Input Monitoring, capture window pixels, read window titles, record keystrokes, or send telemetry. It has no network client, automatic updater, or login-item installer.
+CmdTabo requests **Accessibility only**, to intercept the switcher shortcut. It does not request Screen Recording or Input Monitoring, capture window pixels, read window titles, record keystrokes, or send telemetry. The updater fetches a signed feed from GitHub and release archives from GitHub Releases over HTTPS; it sends no logs or system profile. There is no login-item installer.
 
 It reads app visibility and window metadata locally. The optional `--diagnose` command prints app names, window metadata, and display information; diagnostic output is for local inspection and is not part of published releases. See [publication checks](PRIVACY.md).
 
@@ -37,10 +39,10 @@ AltTab's current [FAQ](https://alt-tab.app/faq) also allows skipping Screen Reco
 
 ## Build and test
 
-Quit the packaged app before rebuilding; the packaging script refuses to overwrite a running app or its recovery process. Requires Xcode or Swift command-line tools and the macOS SDK. There are no external package dependencies or Xcode project.
+Quit the packaged app before rebuilding; the packaging script refuses to overwrite a running app or its recovery process. Requires Xcode or Swift command-line tools and the macOS SDK. There is no Xcode project. SwiftPM resolves the pinned Sparkle 2.10.0 dependency and verifies its binary artifact checksum.
 
 ```sh
-swift test
+swift test --disable-keychain
 python3 -m unittest discover -s tests -p 'test_*.py'
 bash scripts/package-app.sh release
 open build/CmdTabo.app
@@ -56,7 +58,9 @@ bash scripts/package-release.sh
 python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.7-macos-arm64.zip
 ```
 
-Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It generates a SHA-256 checksum file alongside the ZIP. Build output and diagnostic data are ignored by Git.
+Release packaging remaps source paths, strips debug information, removes extended attributes, and archives only the app. It preserves internal framework symlinks and executable permissions, verifies nested signatures, and generates a SHA-256 checksum file alongside the ZIP. Sparkle validates Ed25519 signatures on both the feed and archive before extraction. App source paths are remapped; developer headers and modules are omitted from the embedded framework.
+
+For publishing an update, see [the release workflow](docs/releasing.md). Build output and diagnostic data are ignored by Git.
 
 ## How it works
 

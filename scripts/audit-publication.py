@@ -6,9 +6,12 @@ import os
 from pathlib import Path
 import re
 import socket
+import stat
 import subprocess
 import sys
 import zipfile
+
+from release_archive import FRAMEWORK_ROOT, validate_archive_entries
 
 
 def git(*args, check=True):
@@ -242,6 +245,7 @@ def main():
             if archive.comment:
                 issues.append(('archive', 'ZIP comment'))
             seen = set()
+            archive_entries = []
             for item in archive.infolist():
                 path = item.filename
                 label = safe_label('archive:' + path, hints)
@@ -253,13 +257,21 @@ def main():
                     issues.append(('archive', 'unexpected or absolute entry path'))
                 if item.extra or item.comment:
                     issues.append((label, 'extended ZIP metadata'))
+                mode = item.external_attr >> 16
+                data = b'' if item.is_dir() else archive.read(item)
+                archive_entries.append((path, mode, data if stat.S_ISLNK(mode) else b''))
                 if item.is_dir():
                     continue
                 if not (path in ['CmdTabo.app/Contents/Info.plist', 'CmdTabo.app/Contents/MacOS/CmdTabo',
                                  'CmdTabo.app/Contents/_CodeSignature/CodeResources']
-                        or path.startswith('CmdTabo.app/Contents/Resources/')):
+                        or path.startswith('CmdTabo.app/Contents/Resources/')
+                        or path.startswith(FRAMEWORK_ROOT + '/')):
                     issues.append((label, 'unexpected bundled file'))
-                inspect(label, archive.read(item), source=False)
+                inspect(label, data, source=False)
+            try:
+                validate_archive_entries(archive_entries)
+            except ValueError as error:
+                issues.append(('archive', str(error)))
             if 'CmdTabo.app/Contents/MacOS/CmdTabo' not in seen:
                 issues.append(('archive', 'missing app executable'))
 

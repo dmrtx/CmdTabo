@@ -2,6 +2,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,7 @@ import zipfile
 
 
 AUDITOR = Path(__file__).resolve().parents[1] / 'scripts' / 'audit-publication.py'
+sys.path.insert(0, str(AUDITOR.parent))
 SPEC = importlib.util.spec_from_file_location('audit_publication', AUDITOR)
 audit = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit)
@@ -309,6 +311,49 @@ class PublicationAuditTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(AUDITOR), '--history'], cwd=self.root,
                                 capture_output=True, text=True, env=environment)
         self.assert_private_commit_failure(result, hint)
+
+    def framework_archive(self, extras=()):
+        path = self.root / 'framework.zip'
+        root = audit.FRAMEWORK_ROOT
+        entries = [('CmdTabo.app/Contents/MacOS/CmdTabo', stat.S_IFREG | 0o755, b'innocuous executable fixture'),
+                   (root + '/Versions/B/Sparkle', stat.S_IFREG | 0o755, b'innocuous framework fixture'),
+                   (root + '/Versions/Current', stat.S_IFLNK | 0o777, b'B'),
+                   (root + '/Sparkle', stat.S_IFLNK | 0o777, b'Versions/Current/Sparkle')]
+        with zipfile.ZipFile(path, 'w') as bundle:
+            for name, mode, payload in [*entries, *extras]:
+                entry = zipfile.ZipInfo(name)
+                entry.create_system = 3
+                entry.external_attr = mode << 16
+                bundle.writestr(entry, payload)
+        return path
+
+    def test_archive_accepts_sparkle_framework_with_safe_version_links(self):
+        self.add('safe.txt')
+        result = self.run_audit('--archive', str(self.framework_archive()))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_archive_rejects_escaping_framework_links_without_printing_target(self):
+        self.add('safe.txt')
+        target = ('/outside/' + self.private_name).encode()
+        archive = self.framework_archive([(audit.FRAMEWORK_ROOT + '/escape', stat.S_IFLNK | 0o777, target)])
+        result = self.run_audit('--archive', str(archive))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('symlink target', result.stdout)
+        self.assertNotIn(self.private_name, result.stdout + result.stderr)
+
+    def test_archive_rejects_unapproved_frameworks_and_resource_links(self):
+        self.add('safe.txt')
+        for name, mode, payload in [('CmdTabo.app/Contents/Frameworks/Other.framework/Other', stat.S_IFREG | 0o755, b'innocuous'),
+                                    ('CmdTabo.app/Contents/Resources/alias', stat.S_IFLNK | 0o777, b'../MacOS/CmdTabo')]:
+            archive = self.framework_archive([(name, mode, payload)])
+            result = self.run_audit('--archive', str(archive))
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_framework_contents_keep_existing_private_data_checks(self):
+        self.add('safe.txt')
+        name = audit.FRAMEWORK_ROOT + '/Versions/B/Resources/' + self.private_name + '.txt'
+        archive = self.framework_archive([(name, stat.S_IFREG | 0o644, self.private_name.encode())])
+        self.assert_redacted_failure(self.run_audit('--archive', str(archive)), self.private_name)
 
 
 if __name__ == '__main__':

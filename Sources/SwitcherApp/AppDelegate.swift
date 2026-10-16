@@ -16,6 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var preview = false
     private var renderQueued = false
     private var statusItem: NSStatusItem!
+    private let updates = UpdateController()
+    private var versionLabel: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        return "CmdTabo \(info["CFBundleShortVersionString"] as? String ?? "development") · build \(info["CFBundleVersion"] as? String ?? "unknown")"
+    }
     private var settings: NSWindow!
     private let status = NSTextField(wrappingLabelWithString: "Preparing…")
     private let displaysLabel = NSTextField(wrappingLabelWithString: "")
@@ -58,9 +63,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let root = NSMenuItem()
         root.submenu = appMenu
         mainMenu.addItem(root)
+        appMenu.addItem(NSMenuItem(title: versionLabel, action: nil, keyEquivalent: ""))
+        appMenu.addItem(.separator())
         let preferences = NSMenuItem(title: "CmdTabo Settings…", action: #selector(showSettings), keyEquivalent: ",")
         preferences.target = self
         appMenu.addItem(preferences)
+        updates.addMenuItems(to: appMenu)
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "Quit CmdTabo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         NSApp.mainMenu = mainMenu
@@ -71,6 +79,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         createStatusItem()
         createSettings()
+        updates.onWillRelaunch = { [weak self] in self?.prepareForUpdate() }
+        updates.onUpdateReady = { [weak self] available in
+            self?.statusItem.button?.image = NSImage(systemSymbolName: available ? "arrow.down.circle.fill" : "square.stack.3d.up", accessibilityDescription: available ? "CmdTabo update available" : "CmdTabo")
+        }
+        updates.start()
         accessibility.onChange = { [weak self] trusted in
             guard let self else { return }
             if trusted { self.lifecycle.retry() }
@@ -246,21 +259,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         minimizedButton.state = filterOptions.excludeMinimized ? .on : .off
         hiddenButton.state = filterOptions.excludeHidden ? .on : .off
         windowlessButton.state = filterOptions.excludeWindowless ? .on : .off
-        statusItem.button?.toolTip = "CmdTabo · " + (keyboard.running ? "Active" : "Pending / paused")
+        statusItem.button?.toolTip = versionLabel + " · " + (keyboard.running ? "Active" : "Pending / paused")
     }
     private func createStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "CmdTabo")
         let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: versionLabel, action: nil, keyEquivalent: ""))
+        menu.addItem(.separator())
         for (title, action) in [("CmdTabo Settings…", #selector(showSettings)),
                                 ("Preview switcher", #selector(showPreview)),
                                 ("Pause / resume", #selector(toggleEnabled)),
-                                ("Open diagnostic logs", #selector(openLogs)),
-                                ("Quit CmdTabo", #selector(quit))] {
+                                ("Open diagnostic logs", #selector(openLogs))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
             menu.addItem(item)
         }
+        menu.addItem(.separator())
+        updates.addMenuItems(to: menu)
+        menu.addItem(.separator())
+        let quitItem = NSMenuItem(title: "Quit CmdTabo", action: #selector(quit), keyEquivalent: "")
+        quitItem.target = self
+        menu.addItem(quitItem)
         statusItem.menu = menu
     }
     private func createSettings() {
@@ -401,7 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let version = info["CFBundleShortVersionString"] as? String ?? "development"
         let build = info["CFBundleVersion"] as? String ?? "unknown"
         let privacy = column([label("Version \(version) · build \(build)", size: 10),
-                              label("Local only · No screen capture", size: 10)], spacing: 3)
+                              label("No telemetry · No screen capture", size: 10)], spacing: 3)
         let footer = NSStackView(views: [privacy, NSView(), buttons])
         footer.orientation = .horizontal
         footer.alignment = .centerY
@@ -472,9 +492,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cancel(); updateStatus()
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showSettings(); return true }
-    func applicationWillTerminate(_ notification: Notification) {
-        nativeCommandTab.restore(); keyboard.stop(); heartbeat?.invalidate(); catalog.suspend()
+    func prepareForUpdate() {
+        // Sparkle can ask to relaunch before AppKit starts normal termination.
+        // Block queued permission callbacks from acquiring shortcuts again.
+        relaunching = true
+        nativeCommandTab.restore()
+        deliveryMonitor.reset()
+        keyboard.stop()
+        heartbeat?.invalidate()
+        heartbeat = nil
+        catalog.suspend()
         for observer in lifecycleObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        lifecycleObservers.removeAll()
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        prepareForUpdate()
         DiagnosticLog.shared.record("terminated normally")
         DiagnosticLog.shared.flush()
     }
