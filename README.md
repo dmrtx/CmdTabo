@@ -4,12 +4,14 @@ A small macOS app switcher with the familiar ⌘Tab interaction: one icon per ap
 
 Four independent filters are enabled by default:
 
-- **Apps with all windows minimized** disappear until a window is restored.
+- **Minimized apps** can be hidden, shown in recent order, or shown at the end. Existing installations keep their previous choice. When included, apps with all user windows minimized have a small window badge and a “Minimized” label; restoring a window returns them to their recent position.
 - **Hidden apps (⌘H)** disappear until the app is unhidden. Hiding and minimizing are handled separately.
 - **Apps without windows** disappear while running in the background and return when a window opens. Closed windows and invisible helpers do not count as usable windows.
 - **Apps with windows only on other displays** are excluded from the display under the pointer when switching starts.
 
 An app with eligible windows on both displays appears on both. Windows spanning displays belong to the display containing the largest portion of the window. With the minimized-app filter disabled, minimized windows also count toward display membership. Disable the windowless-app filter to keep background apps available. Unknown window states remain available unless another filter excludes them; windows on other Spaces are not considered closed or minimized merely because they are off screen.
+
+Use **Always hidden apps…** in Settings to choose specific applications that should never appear in ⌘Tab or Preview. Add apps from disk even when they are not running, and remove them from the list to let the normal filters apply again. Choices are saved locally and follow the app's bundle identifier across restarts, updates and moves; apps without an identifier use their location. Exclusions take priority over the minimized-app setting. Showing minimized apps at the end preserves recent order within both groups and still respects the other filters.
 
 ## Download and use
 
@@ -57,7 +59,7 @@ The window probe creates only its own disposable windows and checks real WindowS
 bash scripts/check-signing-identity.sh
 bash scripts/test-signing-continuity.sh
 bash scripts/package-release.sh
-python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.10-macos-arm64.zip
+python3 scripts/audit-publication.py --history --archive build/releases/CmdTabo-0.1.11-macos-arm64.zip
 ```
 
 Release packaging requires the existing local certificate and private key in the maintainer's login Keychain. It fails if that identity is missing, differs from the public pins in `signing-config.env`, or ad hoc signing was requested. It never generates a new identity. Disposable development builds can explicitly use `SIGNING_MODE=adhoc`; their Accessibility grants do not carry across builds.

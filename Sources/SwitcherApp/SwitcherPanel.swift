@@ -5,8 +5,10 @@ private final class OverlayPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-private final class AppTile: NSButton {
+final class AppTile: NSButton {
     let pid: Int32
+    private let minimizedBadge = NSImageView()
+    private var presentation: (name: String, minimized: Bool)?
     var onClick: ((Int32) -> Void)?
     var selected = false {
         didSet {
@@ -32,14 +34,35 @@ private final class AppTile: NSButton {
         addSubview(icon)
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel(entry.name)
+        let badgeSide = min(22, max(14, side * 0.28))
+        minimizedBadge.frame = NSRect(x: frame.width - badgeSide - 3, y: 3, width: badgeSide, height: badgeSide)
+        minimizedBadge.image = NSImage(systemSymbolName: "minus.rectangle.fill", accessibilityDescription: nil)
+        minimizedBadge.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: badgeSide * 0.62, weight: .semibold)
+        minimizedBadge.imageScaling = .scaleProportionallyDown
+        minimizedBadge.contentTintColor = .labelColor
+        minimizedBadge.wantsLayer = true
+        minimizedBadge.layer?.cornerRadius = badgeSide / 2
+        minimizedBadge.layer?.borderWidth = 0.5
+        minimizedBadge.setAccessibilityElement(false)
+        addSubview(minimizedBadge)
+        update(entry: entry)
         updateHighlight()
+    }
+    func update(entry: AppEntry) {
+        let name = entry.name, minimized = entry.isMinimized
+        guard presentation?.name != name || presentation?.minimized != minimized else { return }
+        presentation = (name, minimized)
+        minimizedBadge.isHidden = !minimized
+        setAccessibilityLabel(name + (minimized ? ", minimized" : ""))
+        toolTip = name + (minimized ? " · Minimized" : "")
     }
     private func updateHighlight() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = selected ? NSColor.labelColor.withAlphaComponent(0.14).cgColor : NSColor.clear.cgColor
             layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
             layer?.borderWidth = selected ? 1 : 0
+            minimizedBadge.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+            minimizedBadge.layer?.borderColor = NSColor.separatorColor.cgColor
         }
         setAccessibilityValue(selected ? "Selected" : "")
     }
@@ -96,11 +119,14 @@ final class SwitcherPanel {
         }
         // Window polling does not rebuild the panel. A Tab press changes only
         // the two affected highlights, the name, and the scroll position.
-        for tile in tiles { tile.selected = tile.pid == selected }
+        for (tile, entry) in zip(tiles, entries) {
+            tile.update(entry: entry)
+            tile.selected = tile.pid == selected
+        }
         if let index = entries.firstIndex(where: { $0.pid == selected }), let scroll, let nameLabel {
             let tile = tiles[index]
             tile.scrollToVisible(tile.bounds)
-            nameLabel.stringValue = entries[index].name
+            nameLabel.stringValue = entries[index].name + (entries[index].isMinimized ? " · Minimized" : "")
             let labelWidth = min(230, width - 24)
             let center = scroll.frame.minX + tile.frame.midX - scroll.contentView.bounds.minX
             nameLabel.frame = NSRect(x: min(max(12, center - labelWidth / 2), width - labelWidth - 12),

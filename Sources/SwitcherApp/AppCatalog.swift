@@ -8,6 +8,7 @@ struct AppEntry {
     var icon: NSImage { app.icon ?? NSImage(named: NSImage.applicationIconName)! }
     let windows: [WindowState]
     let isHidden: Bool
+    var isMinimized: Bool { WindowFilter.allWindowsMinimized(windows, isHidden: isHidden) }
 }
 
 final class AppCatalog {
@@ -112,12 +113,15 @@ final class AppCatalog {
             self.onStall?()
         }
     }
-    func filtered(target: UInt32?, options: FilterOptions) -> [AppEntry] {
+    func filtered(target: UInt32?, options: FilterOptions,
+                  excludedApplications: [ExcludedApplication] = [], minimizedLast: Bool = false) -> [AppEntry] {
         let displays = connectedDisplays()
-        return entries.filter {
-            WindowFilter.exclusion(windows: $0.windows, displays: displays, target: target,
-                                   isHidden: $0.isHidden, options: options) == nil
+        let available = entries.filter { entry in
+            !excludedApplications.contains { $0.matches(bundleIdentifier: entry.app.bundleIdentifier, bundleURL: entry.app.bundleURL) } &&
+            WindowFilter.exclusion(windows: entry.windows, displays: displays, target: target,
+                                   isHidden: entry.isHidden, options: options) == nil
         }
+        return minimizedLast ? AppOrdering.minimizedLast(available, isMinimized: \.isMinimized) : available
     }
     deinit {
         timer?.invalidate()

@@ -3,6 +3,10 @@ import ApplicationServices
 import Carbon
 import SwitcherCore
 
+private final class SettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let catalog = AppCatalog()
     let keyboard = Keyboard()
@@ -17,18 +21,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var renderQueued = false
     private var statusItem: NSStatusItem!
     private let updates = UpdateController()
+    private let preferences = AppPreferences()
+    private var hiddenAppsController: HiddenAppsController?
+    private let hiddenAppsSummary = NSTextField(labelWithString: "")
     private var versionLabel: String {
         let info = Bundle.main.infoDictionary ?? [:]
         return "CmdTabo \(info["CFBundleShortVersionString"] as? String ?? "development") · build \(info["CFBundleVersion"] as? String ?? "unknown")"
     }
-    private var settings: NSWindow!
+    private(set) var settings: NSWindow!
     private let status = NSTextField(wrappingLabelWithString: "Preparing…")
     private let displaysLabel = NSTextField(wrappingLabelWithString: "")
     private let permissionLabel = NSTextField(labelWithString: "Checking Accessibility…")
     private let permissionIcon = NSImageView()
     private var enabledButton: NSButton!
     private var scopeButton: NSButton!
-    private var minimizedButton: NSButton!
+    private var minimizedMenu: NSPopUpButton!
     private var hiddenButton: NSButton!
     private var windowlessButton: NSButton!
     private var accessibilityButton: NSButton!
@@ -47,10 +54,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         get { UserDefaults.standard.bool(forKey: "onlyThisDisplay") }
         set { UserDefaults.standard.set(newValue, forKey: "onlyThisDisplay") }
     }
-    private var filterOptions: FilterOptions {
-        FilterOptions(excludeMinimized: UserDefaults.standard.bool(forKey: "excludeMinimized"),
-                      excludeHidden: UserDefaults.standard.bool(forKey: "excludeHidden"),
-                      excludeWindowless: UserDefaults.standard.bool(forKey: "excludeWindowless"))
+    private var filterOptions: FilterOptions { preferences.filterOptions }
+    private func filteredEntries() -> [AppEntry] {
+        catalog.filtered(target: target, options: filterOptions,
+                         excludedApplications: preferences.excludedApplications,
+                         minimizedLast: preferences.minimizedAppsMode == .atEnd)
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) { configureLifecycle() }
@@ -94,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         catalog.onChange = { [weak self] in
             guard let self else { return }
             if self.showing {
-                self.sessionEntries = self.catalog.filtered(target: self.target, options: self.filterOptions)
+                self.sessionEntries = self.filteredEntries()
                 self.selection.update(ids: self.sessionEntries.map(\.pid))
                 self.scheduleRender()
             }
@@ -180,8 +188,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard catalog.ready else { return }
         sessionScreen = pointerScreen()
         target = onlyThisDisplay ? displayID(sessionScreen) : nil
-        sessionEntries = catalog.filtered(target: target, options: filterOptions)
-        selection.begin(ids: sessionEntries.map(\.pid), current: NSWorkspace.shared.frontmostApplication?.processIdentifier, backwards: backwards)
+        sessionEntries = filteredEntries()
+        var current = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        // If the front app was just minimized, forward switching should start
+        // with a regular app rather than another member of the deferred group.
+        if !backwards, preferences.minimizedAppsMode == .atEnd,
+           sessionEntries.first(where: { $0.pid == current })?.isMinimized == true,
+           sessionEntries.contains(where: { !$0.isMinimized }) { current = nil }
+        selection.begin(ids: sessionEntries.map(\.pid), current: current, backwards: backwards)
         self.preview = preview
         showing = true
         DiagnosticLog.shared.record("selector opened count=\(sessionEntries.count) preview=\(preview)")
@@ -256,7 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         displaysLabel.stringValue = "\(screens.count) display\(screens.count == 1 ? "" : "s") · " + screens.map(\.localizedName).joined(separator: ", ")
         enabledButton.state = enabled ? .on : .off
         scopeButton.state = onlyThisDisplay ? .on : .off
-        minimizedButton.state = filterOptions.excludeMinimized ? .on : .off
+        minimizedMenu.selectItem(at: MinimizedAppsMode.allCases.firstIndex(of: preferences.minimizedAppsMode)!)
         hiddenButton.state = filterOptions.excludeHidden ? .on : .off
         windowlessButton.state = filterOptions.excludeWindowless ? .on : .off
         statusItem.button?.toolTip = versionLabel + " · " + (keyboard.running ? "Active" : "Pending / paused")
@@ -283,10 +297,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
         statusItem.menu = menu
     }
-    private func createSettings() {
-        settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 600),
-                            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    func createSettings() {
+        let height = min(690, (NSScreen.main?.visibleFrame.height ?? 770) - 80)
+        settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: height),
+                            styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         settings.title = "CmdTabo"
+        settings.minSize = NSSize(width: 520, height: 420)
         settings.isReleasedWhenClosed = false
         func label(_ text: String, size: CGFloat = 12, weight: NSFont.Weight = .regular,
                    color: NSColor = .secondaryLabelColor) -> NSTextField {
@@ -378,19 +394,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         enabledButton = NSButton(checkboxWithTitle: "Use CmdTabo for ⌘Tab", target: self, action: #selector(toggleEnabled))
         enabledButton.font = .systemFont(ofSize: 13, weight: .medium)
-        minimizedButton = NSButton(checkboxWithTitle: "Minimized apps", target: self, action: #selector(toggleMinimized))
+        minimizedMenu = NSPopUpButton(frame: .zero, pullsDown: false)
+        minimizedMenu.addItems(withTitles: MinimizedAppsMode.allCases.map(\.title))
+        minimizedMenu.target = self
+        minimizedMenu.action = #selector(changeMinimizedMode)
+        minimizedMenu.setAccessibilityLabel("Minimized apps")
+        let minimizedTitle = label("Minimized apps", size: 12, weight: .medium, color: .labelColor)
+        minimizedTitle.setContentHuggingPriority(.required, for: .horizontal)
+        let minimizedRow = NSStackView(views: [minimizedTitle, NSView(), minimizedMenu])
+        minimizedRow.orientation = .horizontal
+        let minimized = column([minimizedRow,
+                                label("Applies when all windows are minimized. Shown apps get a small window badge.", size: 11)], spacing: 4)
         hiddenButton = NSButton(checkboxWithTitle: "Hidden apps", target: self, action: #selector(toggleHidden))
         windowlessButton = NSButton(checkboxWithTitle: "Apps without windows", target: self, action: #selector(toggleWindowless))
         scopeButton = NSButton(checkboxWithTitle: "Apps only on other displays", target: self, action: #selector(toggleScope))
         let filters = column([
-            filterRow(minimizedButton, hint: "Exclude apps when all their windows are minimized."),
             filterRow(hiddenButton, hint: "Exclude apps hidden with ⌘H."),
             filterRow(windowlessButton, hint: "Exclude background apps until a window opens."),
             filterRow(scopeButton, hint: "Use the display under your pointer when switching.")
         ], spacing: 14)
+        let hiddenApps = NSButton(title: "Always hidden apps…", target: self, action: #selector(showHiddenApps))
+        hiddenApps.bezelStyle = .rounded
+        hiddenAppsSummary.font = .systemFont(ofSize: 11)
+        hiddenAppsSummary.textColor = .secondaryLabelColor
+        let exclusions = NSStackView(views: [hiddenApps, hiddenAppsSummary, NSView()])
+        exclusions.orientation = .horizontal
+        exclusions.spacing = 10
+        updateHiddenAppsSummary()
         let switcher = card(column([
             enabledButton, divider(),
-            label("EXCLUDE FROM THE SWITCHER", size: 10, weight: .semibold), filters
+            label("APP VISIBILITY", size: 10, weight: .semibold), minimized, filters,
+            divider(), exclusions
         ], spacing: 14))
 
         displaysLabel.font = .systemFont(ofSize: 11)
@@ -428,12 +462,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let stack = column([header, shortcutLine, switcher, connection, footer], spacing: 18)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        settings.contentView?.addSubview(stack)
+        let scroll = NSScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        let document = SettingsDocumentView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        scroll.documentView = document
+        let content = settings.contentView!
+        content.addSubview(scroll)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: settings.contentView!.leadingAnchor, constant: 26),
-            stack.trailingAnchor.constraint(equalTo: settings.contentView!.trailingAnchor, constant: -26),
-            stack.topAnchor.constraint(equalTo: settings.contentView!.topAnchor, constant: 24),
-            stack.bottomAnchor.constraint(equalTo: settings.contentView!.bottomAnchor, constant: -24)
+            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: content.topAnchor), scroll.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 26),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -26),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 24),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -24)
         ])
         settings.center()
     }
@@ -466,7 +515,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    @objc private func showSettings() { cancel(); NSApp.activate(ignoringOtherApps: true); settings.makeKeyAndOrderFront(nil); updateStatus() }
+    @objc private func showSettings() {
+        cancel(); NSApp.activate(ignoringOtherApps: true); settings.makeKeyAndOrderFront(nil)
+        updateHiddenAppsSummary(); updateStatus()
+    }
+    private func updateHiddenAppsSummary() {
+        let count = preferences.excludedApplications.count
+        hiddenAppsSummary.stringValue = count == 0 ? "No apps always hidden" : "\(count) app\(count == 1 ? "" : "s") always hidden"
+    }
+    @objc private func showHiddenApps() {
+        cancel()
+        if hiddenAppsController == nil {
+            let controller = HiddenAppsController(preferences: preferences)
+            controller.onChange = { [weak self] in
+                self?.cancel()
+                self?.updateHiddenAppsSummary()
+            }
+            hiddenAppsController = controller
+        }
+        hiddenAppsController?.showWindow(nil)
+    }
     @objc private func showPreview() { cancel(); settings.orderOut(nil); catalog.refresh(); begin(backwards: false, preview: true) }
     @objc private func toggleEnabled() {
         if lifecycle.failed { lifecycle.retry(); enabled = true }
@@ -476,8 +544,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc private func openLogs() { NSWorkspace.shared.open(DiagnosticLog.directory) }
     @objc private func toggleScope() { onlyThisDisplay.toggle(); cancel(); updateStatus() }
-    @objc private func toggleMinimized() {
-        UserDefaults.standard.set(!filterOptions.excludeMinimized, forKey: "excludeMinimized")
+    @objc private func changeMinimizedMode() {
+        guard MinimizedAppsMode.allCases.indices.contains(minimizedMenu.indexOfSelectedItem) else { return }
+        preferences.minimizedAppsMode = MinimizedAppsMode.allCases[minimizedMenu.indexOfSelectedItem]
         cancel(); updateStatus()
     }
     @objc private func toggleHidden() {

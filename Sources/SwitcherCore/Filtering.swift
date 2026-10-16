@@ -48,6 +48,11 @@ public struct FilterOptions: Equatable {
 public enum Exclusion: String { case hidden, minimized, windowless, otherDisplay }
 
 public enum WindowFilter {
+    public static func allWindowsMinimized(_ windows: [WindowState], isHidden: Bool = false) -> Bool {
+        let real = windows.filter { $0.isUserWindow(appIsHidden: isHidden) }
+        return !real.isEmpty && real.allSatisfy(\.minimized)
+    }
+
     public static func displayID(for rect: CGRect, displays: [Display]) -> UInt32? {
         guard !rect.isEmpty, !rect.isNull else { return nil }
         let overlaps = displays.map { display -> (UInt32, CGFloat) in
@@ -71,6 +76,18 @@ public enum WindowFilter {
             if locations.allSatisfy({ $0 != nil && $0 != target }) { return .otherDisplay }
         }
         return nil
+    }
+}
+
+public enum AppOrdering {
+    // Preserve recent order within each group, including when a window returns.
+    public static func minimizedLast<Element>(_ entries: [Element], isMinimized: (Element) -> Bool) -> [Element] {
+        var regular: [Element] = [], minimized: [Element] = []
+        for entry in entries {
+            if isMinimized(entry) { minimized.append(entry) }
+            else { regular.append(entry) }
+        }
+        return regular + minimized
     }
 }
 
