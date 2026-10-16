@@ -54,12 +54,8 @@ ensure_app_stopped
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
-# Convert Icon.icon to Icon.icns if present (requires iconutil).
-ICON_SOURCE="$ROOT/Icon.icon"
-ICON_TARGET="$ROOT/Icon.icns"
-if [[ -f "$ICON_SOURCE" ]]; then
-  iconutil --convert icns --output "$ICON_TARGET" "$ICON_SOURCE"
-fi
+bash "$ROOT/scripts/build-icon.sh"
+ICON_TARGET="$ROOT/build/icon/Icon.icns"
 
 LSUI_VALUE="false"
 if [[ "$MENU_BAR_APP" == "1" ]]; then

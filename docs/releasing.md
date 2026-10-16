@@ -24,7 +24,9 @@ Back up the signing key securely according to
 ## Build and publish order
 
 1. Increase both fields in `version.env`; `BUILD_NUMBER` must increase monotonically.
-2. Run Swift and Python tests, review changes, and merge the release source into
+2. If artwork changed, inspect its content and PNG metadata, update the reviewed
+   SHA-256 in the publication auditor, and generate native icon sizes. Run Swift
+   and Python tests, review changes, and merge the release source into
    `main`. Create the version tag using the public Git identity. Build only from a
    clean checkout so the app’s source metadata identifies the tagged commit.
 3. Run `bash scripts/package-release.sh`. It verifies nested signatures, creates

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read-only checks of the Git index, reachable history, and a release ZIP."""
 import argparse
+import hashlib
 import ipaddress
 import os
 from pathlib import Path
@@ -13,6 +14,11 @@ import zipfile
 
 from release_archive import FRAMEWORK_ROOT, validate_archive_entries
 
+# Only these exact reviewed artwork bytes may be binary source assets. Renames
+# still undergo all path checks, and every byte still goes through findings().
+REVIEWED_ARTWORK_SHA256 = frozenset({
+    '933079ba04a0fb76e1607817ede1fcfc1190cf533cfa234280b917fae882665d',  # assets/CmdTabo.png
+})
 
 def git(*args, check=True):
     # Push transfers the original objects, not the local replacement view.
@@ -54,7 +60,9 @@ FORBIDDEN_FILES = re.compile(r'(?:^|/)(?:build|dist|\.build|\.swiftpm|__MACOSX)(
 
 
 def findings(data, hints):
-    text = data.decode('utf-8', errors='ignore')
+    # Preserve invalid-byte boundaries. Dropping bytes can join unrelated ASCII
+    # fragments in compressed artwork into an email or another false match.
+    text = data.decode('utf-8', errors='replace')
     found = {name for name, pattern in COMPILED.items() if pattern.search(text)}
     if any(pattern.search(text) for pattern in hints):
         found.add('local identity text')
@@ -125,7 +133,7 @@ def main():
         nonlocal count
         count += 1
         label = safe_label(label, hints)
-        if source and b'\0' in data:
+        if source and b'\0' in data and hashlib.sha256(data).hexdigest() not in REVIEWED_ARTWORK_SHA256:
             issues.append((label, 'binary file in source Git history'))
         for reason in findings(data, hints):
             issues.append((label, reason))
