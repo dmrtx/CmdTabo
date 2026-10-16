@@ -6,6 +6,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>CmdTabo</title>
         <item>
+            <title>0.1.11</title>
+            <pubDate>Fri, 16 Oct 2026 13:36:15 -0500</pubDate>
+            <link>https://github.com/dmrtx/CmdTabo/releases/tag/v0.1.11</link>
+            <sparkle:version>15</sparkle:version>
+            <sparkle:shortVersionString>0.1.11</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/dmrtx/CmdTabo/releases/download/v0.1.11/CmdTabo-0.1.11-macos-arm64.zip" length="2352647" type="application/octet-stream" sparkle:edSignature="oKsO4cHhqLUOuk/622S+1xmUusAyPl6++VKUYuMtcM2OYVsyGYpBScBAYR5dk76FbM3/j/kKlIaVMdsfa44oAQ=="/>
+        </item>
+        <item>
             <title>0.1.10</title>
             <pubDate>Fri, 16 Oct 2026 11:37:23 -0500</pubDate>
             <link>https://github.com/dmrtx/CmdTabo/releases/tag/v0.1.10</link>
@@ -25,19 +35,9 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/dmrtx/CmdTabo/releases/download/v0.1.9/CmdTabo-0.1.9-macos-arm64.zip" length="2298067" type="application/octet-stream" sparkle:edSignature="sjqM5IShBYWMj+LaHiRTNtIAZfPaw1LOqoGfww57ci29/L5JkrKJArmUxHMZl24VDbsRC1ocZDRrXAcEtkdpDQ=="/>
         </item>
-        <item>
-            <title>0.1.8</title>
-            <pubDate>Fri, 16 Oct 2026 10:50:31 -0500</pubDate>
-            <link>https://github.com/dmrtx/CmdTabo/releases/tag/v0.1.8</link>
-            <sparkle:version>12</sparkle:version>
-            <sparkle:shortVersionString>0.1.8</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/dmrtx/CmdTabo/releases/download/v0.1.8/CmdTabo-0.1.8-macos-arm64.zip" length="2296199" type="application/octet-stream" sparkle:edSignature="+KY/etvf4Q0FuArmSN+q8xnRe8PXXN34xPZXp8emTvvwyCr0Tuog0vxVlXC8a+9SOYnm9qv4J7egjxm6sdktBw=="/>
-        </item>
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: kFB0sa3V5TdWzDJZCqMZZCO3c8FN93t+qWWkx0rv6Xe13OEWso4+Tsfi2X8P3KRKP5cLbbbHxNzX8tR8akdBBA==
-length: 2734
+edSignature: uRF6zQp66GQn7ZOvWz9BfnCMWJwZIeY6ce8NqDzgh1T7KUifKxZHQtFmNgN0KoNMkoepSUAUZoOZ0DozWbbpDA==
+length: 2739
 -->
